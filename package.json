@@ -21,5 +21,11 @@
     "entities",
     "dots",
     "unity"
-  ]
+  ],
+  "repository": {
+    "footprint": "5e7ab31d010e47cb5df022095474e635a942e71f",
+    "type": "git",
+    "url": "https://github.com/Unity-Technologies/dots.git",
+    "revision": "d09545cfa629c4a0e250caa0a36d4ba07d9a8fc6"
+  }
 }
