@@ -1,30 +1,72 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Unity.Assertions;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
-using Unity.Entities;
 using Unity.Jobs;
-using Unity.Jobs.LowLevel.Unsafe;
-using UnityEngine.Profiling;
+using Unity.Profiling;
 
 namespace Unity.Entities
 {
     class ManagedEntityDataAccess
     {
+        volatile static ManagedEntityDataAccess[] s_Instances = {null, null, null, null};
+
+        // AllocHandle and FreeHandle must be called from the main thread
+        public static int AllocHandle(ManagedEntityDataAccess instance)
+        {
+            var count = s_Instances.Length;
+            for(int i=0; i<count; ++i)
+            {
+                if (s_Instances[i] == null)
+                {
+                    s_Instances[i] = instance;
+                    return i;
+                }
+            }
+
+            var newInstances = new ManagedEntityDataAccess[count*2];
+            for (int i = 0; i < count; ++i)
+                newInstances[i] = s_Instances[i];
+            newInstances[count] = instance;
+
+            s_Instances = newInstances;
+            return count;
+        }
+
+        public static void FreeHandle(int i)
+        {
+            s_Instances[i] = null;
+        }
+
+        // This is thread safe even if s_Instances is being resized concurrently since both the old and new versions
+        // will have the same value at s_Instances[handle] and the reference is updated atomically
+        public static ManagedEntityDataAccess GetInstance(int handle)
+        {
+            return s_Instances[handle];
+        }
+
         public World                       m_World;
-        public EntityQuery                 m_UniversalQuery; // matches all components
         public EntityManager.EntityManagerDebug m_Debug;
         public ManagedComponentStore       m_ManagedComponentStore;
-        public EntityQuery                 m_UniversalQueryWithChunks;
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    [BurstCompatible]
     unsafe struct EntityDataAccess : IDisposable
     {
-        internal ManagedEntityDataAccess ManagedEntityDataAccess => (ManagedEntityDataAccess)m_ManagedAccess.Target;
+        private delegate void PlaybackManagedDelegate(IntPtr self);
+
+        private static readonly SharedStatic<IntPtr> s_ManagedPlaybackTrampoline = SharedStatic<IntPtr>.GetOrCreate<PlaybackManagedDelegate>();
+        private static object s_DelegateGCPrevention;
+
+        [NotBurstCompatible]
+        internal ManagedEntityDataAccess ManagedEntityDataAccess => ManagedEntityDataAccess.GetInstance(m_ManagedAccessHandle);
+
+        [NotBurstCompatible]
         internal ManagedComponentStore ManagedComponentStore => ManagedEntityDataAccess.m_ManagedComponentStore;
 
         // These pointer attributes freak debuggers out because they take
@@ -37,7 +79,7 @@ namespace Unity.Entities
         internal EntityComponentStore* EntityComponentStore
         {
             // This is always safe as the EntityDataAccess is always unsafe heap allocated.
-            get { fixed(EntityComponentStore* ptr = &m_EntityComponentStore) { return ptr; } }
+            get { fixed (EntityComponentStore* ptr = &m_EntityComponentStore) { return ptr; } }
         }
 
 #if !NET_DOTS
@@ -46,7 +88,7 @@ namespace Unity.Entities
         internal EntityQueryManager* EntityQueryManager
         {
             // This is always safe as the EntityDataAccess is always unsafe heap allocated.
-            get { fixed(EntityQueryManager* ptr = &m_EntityQueryManager) { return ptr; } }
+            get { fixed (EntityQueryManager* ptr = &m_EntityQueryManager) { return ptr; } }
         }
 
 #if !NET_DOTS
@@ -55,7 +97,7 @@ namespace Unity.Entities
         internal ComponentDependencyManager* DependencyManager
         {
             // This is always safe as the EntityDataAccess is always unsafe heap allocated.
-            get { fixed(ComponentDependencyManager* ptr = &m_DependencyManager) { return ptr; } }
+            get { fixed (ComponentDependencyManager* ptr = &m_DependencyManager) { return ptr; } }
         }
 
         [NativeDisableUnsafePtrRestriction]
@@ -64,8 +106,12 @@ namespace Unity.Entities
         private EntityQueryManager m_EntityQueryManager;
         [NativeDisableUnsafePtrRestriction]
         private ComponentDependencyManager m_DependencyManager;
+        [NativeDisableUnsafePtrRestriction]
+        public EntityQuery                 m_UniversalQuery; // matches all components
+        [NativeDisableUnsafePtrRestriction]
+        public EntityQuery                 m_UniversalQueryWithChunks;
 
-        private GCHandle m_ManagedAccess;
+        private int m_ManagedAccessHandle;
 
         EntityArchetype m_EntityOnlyArchetype;
 
@@ -79,19 +125,18 @@ namespace Unity.Entities
         {
             get
             {
-                fixed(void* ptr = &m_AliveEntityQueries)
+                fixed (void* ptr = &m_AliveEntityQueries)
                 {
-                    return ref UnsafeUtilityEx.AsRef<UnsafeHashMap<ulong, byte>>(ptr);
+                    return ref UnsafeUtility.AsRef<UnsafeHashMap<ulong, byte>>(ptr);
                 }
             }
         }
 
-        internal bool m_JobMode;
-
-        internal bool IsMainThread => !m_JobMode;
+        internal bool m_IsInExclusiveTransaction;
+        internal bool IsInExclusiveTransaction => m_IsInExclusiveTransaction;
 
         [BurstCompile]
-        struct DestroyChunks : IJob
+        internal struct DestroyChunks : IJobBurstSchedulable
         {
             [NativeDisableUnsafePtrRestriction]
             public EntityComponentStore* EntityComponentStore;
@@ -103,12 +148,13 @@ namespace Unity.Entities
             }
         }
 
+        [NotBurstCompatible]
         public static void Initialize(EntityDataAccess* self, World world)
         {
             var managedGuts = new ManagedEntityDataAccess();
 
             self->m_EntityOnlyArchetype = default;
-            self->m_ManagedAccess = GCHandle.Alloc(managedGuts);
+            self->m_ManagedAccessHandle = ManagedEntityDataAccess.AllocHandle(managedGuts);
 
             self->AliveEntityQueries = new UnsafeHashMap<ulong, byte>(32, Allocator.Persistent);
 
@@ -120,7 +166,7 @@ namespace Unity.Entities
 
             managedGuts.m_ManagedComponentStore = new ManagedComponentStore();
 
-            managedGuts.m_UniversalQuery = self->m_EntityQueryManager.CreateEntityQuery(
+            self->m_UniversalQuery = self->m_EntityQueryManager.CreateEntityQuery(
                 self,
                 new EntityQueryDesc[]
                 {
@@ -128,7 +174,7 @@ namespace Unity.Entities
                 }
             );
 
-            managedGuts.m_UniversalQueryWithChunks = self->m_EntityQueryManager.CreateEntityQuery(
+            self->m_UniversalQueryWithChunks = self->m_EntityQueryManager.CreateEntityQuery(
                 self,
                 new EntityQueryDesc[]
                 {
@@ -143,24 +189,54 @@ namespace Unity.Entities
                     }
                 });
 
-            #if ENABLE_UNITY_COLLECTIONS_CHECKS
-            managedGuts.m_UniversalQuery._GetImpl()->_DisallowDisposing = true;
-            managedGuts.m_UniversalQueryWithChunks._GetImpl()->_DisallowDisposing = true;
-            #endif
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            self->m_UniversalQuery._GetImpl()->_DisallowDisposing = true;
+            self->m_UniversalQueryWithChunks._GetImpl()->_DisallowDisposing = true;
+#endif
+
+            if (s_DelegateGCPrevention == null)
+            {
+                var trampoline = new PlaybackManagedDelegate(PlaybackManagedDelegateInMonoWithWrappedExceptions);
+                s_DelegateGCPrevention = trampoline; // Need to hold on to this
+                s_ManagedPlaybackTrampoline.Data = Marshal.GetFunctionPointerForDelegate(trampoline);
+            }
+
+#if ENABLE_PROFILER
+            self->marker_DestroyEntity = new ProfilerMarker("DestroyEntity(EntityQuery entityQueryFilter)");
+            self->marker_GetAllMatchingChunks = new ProfilerMarker("GetAllMatchingChunks");
+            self->marker_EditorOnlyChecks = new ProfilerMarker("EditorOnlyChecks");
+            self->marker_DestroyChunks = new ProfilerMarker("DestroyChunks");
+            self->marker_ManagedPlayback = new ProfilerMarker("Managed Playback");
+#endif
         }
 
+        [NotBurstCompatible]
+        [MonoPInvokeCallback(typeof(PlaybackManagedDelegate))]
+        private static void PlaybackManagedDelegateInMonoWithWrappedExceptions(IntPtr target)
+        {
+            try
+            {
+                ((EntityDataAccess*) target.ToPointer())->PlaybackManagedChanges();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+            }
+        }
+
+        [NotBurstCompatible]
         public void Dispose()
         {
             ManagedEntityDataAccess managedGuts = ManagedEntityDataAccess;
 
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
-            managedGuts.m_UniversalQuery._GetImpl()->_DisallowDisposing = false;
-            managedGuts.m_UniversalQueryWithChunks._GetImpl()->_DisallowDisposing = false;
+            m_UniversalQuery._GetImpl()->_DisallowDisposing = false;
+            m_UniversalQueryWithChunks._GetImpl()->_DisallowDisposing = false;
 #endif
-            managedGuts.m_UniversalQuery.Dispose();
-            managedGuts.m_UniversalQueryWithChunks.Dispose();
-            managedGuts.m_UniversalQuery = default;
-            managedGuts.m_UniversalQueryWithChunks = default;
+            m_UniversalQuery.Dispose();
+            m_UniversalQueryWithChunks.Dispose();
+            m_UniversalQuery = default;
+            m_UniversalQueryWithChunks = default;
 
             m_DependencyManager.Dispose();
             Entities.EntityComponentStore.Destroy(EntityComponentStore);
@@ -170,8 +246,8 @@ namespace Unity.Entities
             managedGuts.m_World = null;
             managedGuts.m_Debug = null;
 
-            m_ManagedAccess.Free();
-            m_ManagedAccess = default;
+            ManagedEntityDataAccess.FreeHandle(m_ManagedAccessHandle);
+            m_ManagedAccessHandle = -1;
 
             AliveEntityQueries.Dispose();
             AliveEntityQueries = default;
@@ -187,62 +263,106 @@ namespace Unity.Entities
             DestroyEntityInternal(&entity, 1);
         }
 
-        public void BeforeStructuralChange()
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private void CheckIsStructuralChange()
         {
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-            if (DependencyManager->IsInTransaction)
-            {
-                throw new InvalidOperationException(
-                    "Access to EntityManager is not allowed after EntityManager.BeginExclusiveEntityTransaction(); has been called.");
-            }
-
             if (DependencyManager->IsInForEachDisallowStructuralChange != 0)
             {
                 throw new InvalidOperationException(
                     "Structural changes are not allowed during Entities.ForEach. Please use EntityCommandBuffer instead.");
             }
+        }
 
+        public void BeforeStructuralChange()
+        {
             // This is not an end user error. If there are any managed changes at this point, it indicates there is some
             // (previous) EntityManager change that is not properly playing back the managed changes that were buffered
             // afterward. That needs to be found and fixed.
+            CheckIsStructuralChange();
             EntityComponentStore->AssertNoQueuedManagedDeferredCommands();
-#endif
 
-            DependencyManager->CompleteAllJobsAndInvalidateArrays();
+            if (!m_IsInExclusiveTransaction)
+                DependencyManager->CompleteAllJobsAndInvalidateArrays();
         }
+
+        private ProfilerMarker marker_DestroyEntity;  // Profiler.BeginSample("DestroyEntity(EntityQuery entityQueryFilter)");
+        private ProfilerMarker marker_GetAllMatchingChunks; // Profiler.BeginSample("GetAllMatchingChunks");
+        private ProfilerMarker marker_EditorOnlyChecks; // Profiler.BeginSample("EditorOnlyChecks");
+        private ProfilerMarker marker_DestroyChunks; //  Profiler.BeginSample("DestroyChunks");
+        private ProfilerMarker marker_ManagedPlayback; // Profiler.BeginSample("Managed Playback");
+
+        [Conditional("ENABLE_PROFILER")]
+        static void BeginMarker(ref ProfilerMarker marker)
+        {
+            marker.Begin();
+        }
+
+        [Conditional("ENABLE_PROFILER")]
+        static void EndMarker(ref ProfilerMarker marker)
+        {
+            marker.End();
+        }
+
 
         public void DestroyEntity(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
+            AssertMainThread();
 
-            Profiler.BeginSample("DestroyEntity(EntityQuery entityQueryFilter)");
+            BeginMarker(ref marker_DestroyEntity);
 
-            Profiler.BeginSample("GetAllMatchingChunks");
-            using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager))
+            BeginMarker(ref marker_GetAllMatchingChunks);
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            EndMarker(ref marker_GetAllMatchingChunks);
+
+            var errorEntity = Entity.Null;
+            var errorReferencedEntity = Entity.Null;
+
+            if (chunks.Length != 0)
             {
-                Profiler.EndSample();
+                BeforeStructuralChange();
 
-                if (chunks.Length != 0)
+                BeginMarker(ref marker_EditorOnlyChecks);
+                EntityComponentStore->AssertWillDestroyAllInLinkedEntityGroup(chunks, GetBufferTypeHandle<LinkedEntityGroup>(false), ref errorEntity, ref errorReferencedEntity);
+                EndMarker(ref marker_EditorOnlyChecks);
+
+                if (errorEntity == Entity.Null)
                 {
-                    BeforeStructuralChange();
-
-                    Profiler.BeginSample("EditorOnlyChecks");
-                    EntityComponentStore->AssertWillDestroyAllInLinkedEntityGroup(chunks, GetArchetypeChunkBufferType<LinkedEntityGroup>(false));
-                    Profiler.EndSample();
-
                     // #todo @macton DestroyEntities should support IJobChunk. But internal writes need to be handled.
-                    Profiler.BeginSample("DestroyChunks");
-                    new DestroyChunks { EntityComponentStore = EntityComponentStore, Chunks = chunks }.Run();
-                    Profiler.EndSample();
+                    BeginMarker(ref marker_DestroyChunks);
+                    RunDestroyChunks(chunks);
+                    EndMarker(ref marker_DestroyChunks);
 
-                    Profiler.BeginSample("Managed Playback");
+                    BeginMarker(ref marker_ManagedPlayback);
                     PlaybackManagedChanges();
-                    Profiler.EndSample();
+                    EndMarker(ref marker_ManagedPlayback);
                 }
             }
+            chunks.Dispose();
 
-            Profiler.EndSample();
+            EndMarker(ref marker_DestroyEntity);
+
+            // Defer throwing so we don't leak native arrays unnecessarily
+            if (errorEntity != Entity.Null)
+            {
+                EntityComponentStore->ThrowDestroyEntityError(errorEntity, errorReferencedEntity);
+            }
+        }
+
+        [BurstDiscard]
+        private void RunDestroyChunksMono(NativeArray<ArchetypeChunk> chunks, ref bool didTheThing)
+        {
+            new DestroyChunks { EntityComponentStore = EntityComponentStore, Chunks = chunks }.Run();
+            didTheThing = true;
+        }
+
+        private void RunDestroyChunks(NativeArray<ArchetypeChunk> chunks)
+        {
+            bool didTheThing = false;
+            RunDestroyChunksMono(chunks, ref didTheThing);
+            if (didTheThing)
+                return;
+
+            EntityComponentStore->DestroyEntities(chunks);
         }
 
         /// <summary>
@@ -256,30 +376,39 @@ namespace Unity.Entities
         /// <exception cref="InvalidOperationException"></exception>
         public void DestroyEntityDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
+            AssertMainThread();
 
-            Profiler.BeginSample("DestroyEntity(EntityQuery entityQueryFilter)");
+            BeginMarker(ref marker_DestroyEntity);
 
-            Profiler.BeginSample("GetAllMatchingChunks");
-            using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager))
+            BeginMarker(ref marker_GetAllMatchingChunks);
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            EndMarker(ref marker_GetAllMatchingChunks);
+
+            var errorEntity = Entity.Null;
+            var errorReferencedEntity = Entity.Null;
+
+            if (chunks.Length != 0)
             {
-                Profiler.EndSample();
+                BeginMarker(ref marker_EditorOnlyChecks);
+                EntityComponentStore->AssertWillDestroyAllInLinkedEntityGroup(chunks, GetBufferTypeHandle<LinkedEntityGroup>(false), ref errorEntity, ref errorReferencedEntity);
+                EndMarker(ref marker_EditorOnlyChecks);
 
-                if (chunks.Length != 0)
+                if (errorEntity == Entity.Null)
                 {
-                    Profiler.BeginSample("EditorOnlyChecks");
-                    EntityComponentStore->AssertWillDestroyAllInLinkedEntityGroup(chunks, GetArchetypeChunkBufferType<LinkedEntityGroup>(false));
-                    Profiler.EndSample();
-
                     // #todo @macton DestroyEntities should support IJobChunk. But internal writes need to be handled.
-                    Profiler.BeginSample("DeleteChunks");
-                    new DestroyChunks { EntityComponentStore = EntityComponentStore, Chunks = chunks }.Run();
-                    Profiler.EndSample();
+                    BeginMarker(ref marker_DestroyChunks);
+                    RunDestroyChunks(chunks);
+                    EndMarker(ref marker_DestroyChunks);
                 }
             }
+            chunks.Dispose();
 
-            Profiler.EndSample();
+            EndMarker(ref marker_DestroyEntity);
+
+            if (errorEntity != default)
+            {
+                EntityComponentStore->ThrowDestroyEntityError(errorEntity, errorReferencedEntity);
+            }
         }
 
         internal EntityArchetype CreateArchetype(ComponentType* types, int count)
@@ -290,9 +419,9 @@ namespace Unity.Entities
 
             // Lookup existing archetype (cheap)
             EntityArchetype entityArchetype;
-        #if ENABLE_UNITY_COLLECTIONS_CHECKS
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
             entityArchetype._DebugComponentStore = EntityComponentStore;
-        #endif
+#endif
 
             entityArchetype.Archetype = EntityComponentStore->GetExistingArchetype(typesInArchetype, cachedComponentCount);
             if (entityArchetype.Archetype != null)
@@ -302,7 +431,7 @@ namespace Unity.Entities
             // because it affects the live iteration linked lists...
             EntityComponentStore.ArchetypeChanges archetypeChanges = default;
 
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
             archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
 
@@ -313,13 +442,16 @@ namespace Unity.Entities
             return entityArchetype;
         }
 
-        internal static int FillSortedArchetypeArray(ComponentTypeInArchetype* dst, ComponentType* requiredComponents, int count)
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void CheckMoreThan1024Components(int count)
         {
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
             if (count + 1 > 1024)
                 throw new ArgumentException($"Archetypes can't hold more than 1024 components");
-#endif
+        }
 
+        internal static int FillSortedArchetypeArray(ComponentTypeInArchetype* dst, ComponentType* requiredComponents, int count)
+        {
+            CheckMoreThan1024Components(count);
             dst[0] = new ComponentTypeInArchetype(ComponentType.ReadWrite<Entity>());
             for (var i = 0; i < count; ++i)
                 SortingUtilities.InsertSorted(dst, i + 1, requiredComponents[i]);
@@ -328,10 +460,12 @@ namespace Unity.Entities
 
         public Entity CreateEntity(EntityArchetype archetype)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
+
             Entity entity = CreateEntityDuringStructuralChange(archetype);
-            ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
+            PlaybackManagedChanges();
             return entity;
         }
 
@@ -351,9 +485,12 @@ namespace Unity.Entities
 
         internal void CreateEntity(EntityArchetype archetype, Entity* outEntities, int count)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
+
             StructuralChange.CreateEntity(EntityComponentStore, archetype.Archetype, outEntities, count);
+
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             Assert.IsTrue(EntityComponentStore->ManagedChangesTracker.Empty);
         }
 
@@ -396,7 +533,7 @@ namespace Unity.Entities
 
             EntityComponentStore->AssertCanAddComponent(entity, componentType);
 
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
@@ -404,6 +541,7 @@ namespace Unity.Entities
             var result = AddComponentDuringStructuralChange(entity, componentType);
 
             EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
 
             return result;
@@ -428,21 +566,23 @@ namespace Unity.Entities
             return result;
         }
 
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private void AssertMainThread()
+        {
+            if (IsInExclusiveTransaction)
+                throw new InvalidOperationException("Must be called from the main thread");
+        }
+
         public void AddComponent(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter,
             ComponentType componentType)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
-
+            AssertMainThread();
             EntityComponentStore->AssertCanAddComponent(archetypeList, componentType);
 
-            using (var chunks =
-                       ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter,
-                           DependencyManager))
-            {
-                if (chunks.Length == 0)
-                    return;
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
 
+            if (chunks.Length > 0)
+            {
                 BeforeStructuralChange();
                 var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
 
@@ -452,8 +592,11 @@ namespace Unity.Entities
                 EntityComponentStore->AddComponentWithValidation(archetypeList, filter, componentType, DependencyManager);
 
                 EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
-                ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
+                EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
+                PlaybackManagedChanges();
             }
+
+            chunks.Dispose();
         }
 
         /// <summary>
@@ -468,23 +611,51 @@ namespace Unity.Entities
         /// <exception cref="InvalidOperationException"></exception>
         public void AddComponentDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentType componentType)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
-
-            using (var chunks =
-                       ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter,
-                           DependencyManager))
+            AssertMainThread();
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            if (chunks.Length > 0)
             {
-                if (chunks.Length == 0)
-                    return;
-
                 StructuralChange.AddComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex);
             }
+            chunks.Dispose();
+        }
+
+        internal void AddComponentsDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentTypes types)
+        {
+            AssertMainThread();
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            if (chunks.Length > 0)
+            {
+                StructuralChange.AddComponentsChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, ref types);
+            }
+            chunks.Dispose();
+        }
+
+        internal void AddComponents(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentTypes types)
+        {
+            AssertMainThread();
+            EntityComponentStore->AssertCanAddComponents(archetypeList, types);
+
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+
+            if (chunks.Length > 0)
+            {
+                BeforeStructuralChange();
+                var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
+
+                StructuralChange.AddComponentsChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, ref types);
+
+                EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
+                EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
+                PlaybackManagedChanges();
+            }
+
+            chunks.Dispose();
         }
 
         public bool RemoveComponent(Entity entity, ComponentType componentType)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
@@ -492,6 +663,7 @@ namespace Unity.Entities
             var removed = RemoveComponentDuringStructuralChange(entity, componentType);
 
             EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
 
             return removed;
@@ -515,14 +687,10 @@ namespace Unity.Entities
 
         public void RemoveComponent(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentType componentType)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
-
-            using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob,
-                ref filter, DependencyManager))
-            {
-                RemoveComponent(chunks, componentType);
-            }
+            AssertMainThread();
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            RemoveComponent(chunks, componentType);
+            chunks.Dispose();
         }
 
         /// <summary>
@@ -537,14 +705,30 @@ namespace Unity.Entities
         /// <exception cref="InvalidOperationException"></exception>
         public void RemoveComponentDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentType componentType)
         {
-            if (!IsMainThread)
+            AssertMainThread();
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            StructuralChange.RemoveComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex);
+            chunks.Dispose();
+        }
+
+        /// <summary>
+        /// EntityManager.BeforeStructuralChange must be called before invoking this.
+        /// ManagedComponentStore.Playback must be called after invoking this.
+        /// EntityQueryManager.AddAdditionalArchetypes must be called after invoking this.
+        /// Invoking this must be wrapped in ArchetypeChangeTracking.
+        /// </summary>
+        /// <param name="archetypeList"></param>
+        /// <param name="filter"></param>
+        /// <param name="componentType"></param>
+        /// <exception cref="InvalidOperationException"></exception>
+        internal void RemoveMultipleComponentsDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, ComponentTypes types)
+        {
+            if (IsInExclusiveTransaction)
                 throw new InvalidOperationException("Must be called from the main thread");
 
-            using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob,
-                ref filter, DependencyManager))
-            {
-                StructuralChange.RemoveComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex);
-            }
+            var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager);
+            StructuralChange.RemoveComponentsChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, ref types);
+            chunks.Dispose();
         }
 
         internal void RemoveComponent(NativeArray<ArchetypeChunk> chunks, ComponentType componentType)
@@ -552,13 +736,14 @@ namespace Unity.Entities
             if (chunks.Length == 0)
                 return;
 
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
             var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
 
             StructuralChange.RemoveComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex);
 
             EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
         }
 
@@ -580,19 +765,15 @@ namespace Unity.Entities
             return EntityComponentStore->HasComponent(entity, type);
         }
 
+        [BurstCompatible(GenericTypeArguments = new[] { typeof(BurstCompatibleComponentData) })]
         public T GetComponentData<T>(Entity entity) where T : struct, IComponentData
         {
             var typeIndex = TypeManager.GetTypeIndex<T>();
 
             EntityComponentStore->AssertEntityHasComponent(entity, typeIndex);
+            EntityComponentStore->AssertZeroSizedComponent(typeIndex);
 
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-            if (ComponentType.FromTypeIndex(typeIndex).IsZeroSized)
-                throw new System.ArgumentException(
-                    $"GetComponentData<{typeof(T)}> can not be called with a zero sized component.");
-#endif
-
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 DependencyManager->CompleteWriteDependency(typeIndex);
 
             var ptr = EntityComponentStore->GetComponentDataWithTypeRO(entity, typeIndex);
@@ -612,19 +793,15 @@ namespace Unity.Entities
             return EntityComponentStore->GetComponentDataRawRWEntityHasComponent(entity, typeIndex);
         }
 
+        [BurstCompatible(GenericTypeArguments = new[] { typeof(BurstCompatibleComponentData) })]
         public void SetComponentData<T>(Entity entity, T componentData) where T : struct, IComponentData
         {
             var typeIndex = TypeManager.GetTypeIndex<T>();
 
             EntityComponentStore->AssertEntityHasComponent(entity, typeIndex);
+            EntityComponentStore->AssertZeroSizedComponent(typeIndex);
 
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
-            if (ComponentType.FromTypeIndex(typeIndex).IsZeroSized)
-                throw new System.ArgumentException(
-                    $"SetComponentData<{typeof(T)}> can not be called with a zero sized component.");
-#endif
-
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 DependencyManager->CompleteReadAndWriteDependency(typeIndex);
 
             var ptr = EntityComponentStore->GetComponentDataWithTypeRW(entity, typeIndex,
@@ -637,6 +814,7 @@ namespace Unity.Entities
             EntityComponentStore->SetComponentDataRawEntityHasComponent(entity, typeIndex, data, size);
         }
 
+        [NotBurstCompatible]
         public bool AddSharedComponentData<T>(Entity entity, T componentData, ManagedComponentStore managedComponentStore) where T : struct, ISharedComponentData
         {
             //TODO: optimize this (no need to move the entity to a new chunk twice)
@@ -655,6 +833,7 @@ namespace Unity.Entities
         /// <param name="componentData"></param>
         /// <typeparam name="T"></typeparam>
         /// <returns></returns>
+        [NotBurstCompatible]
         public bool AddSharedComponentDataDuringStructuralChange<T>(Entity entity, T componentData) where T : struct, ISharedComponentData
         {
             //TODO: optimize this (no need to move the entity to a new chunk twice)
@@ -663,6 +842,7 @@ namespace Unity.Entities
             return added;
         }
 
+        [NotBurstCompatible]
         public void AddSharedComponentDataBoxedDefaultMustBeNull(Entity entity, int typeIndex, int hashCode, object componentData, ManagedComponentStore managedComponentStore)
         {
             //TODO: optimize this (no need to move the entity to a new chunk twice)
@@ -680,6 +860,7 @@ namespace Unity.Entities
         /// <param name="typeIndex"></param>
         /// <param name="hashCode"></param>
         /// <param name="componentData"></param>
+        [NotBurstCompatible]
         public bool AddSharedComponentDataBoxedDefaultMustBeNullDuringStructuralChange(Entity entity, int typeIndex, int hashCode, object componentData, UnsafeList* managedReferenceIndexRemovalCount)
         {
             //TODO: optimize this (no need to move the entity to a new chunk twice)
@@ -689,10 +870,10 @@ namespace Unity.Entities
             return added;
         }
 
+        [NotBurstCompatible]
         public void AddSharedComponentDataBoxedDefaultMustBeNull(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, int typeIndex, int hashCode, object componentData, ManagedComponentStore managedComponentStore)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
+            AssertMainThread();
 
             ComponentType componentType = ComponentType.FromTypeIndex(typeIndex);
             using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager))
@@ -721,10 +902,10 @@ namespace Unity.Entities
         /// <param name="hashCode"></param>
         /// <param name="componentData"></param>
         /// <exception cref="InvalidOperationException"></exception>
+        [NotBurstCompatible]
         public void AddSharedComponentDataBoxedDefaultMustBeNullDuringStructuralChange(UnsafeMatchingArchetypePtrList archetypeList, EntityQueryFilter filter, int typeIndex, int hashCode, object componentData, UnsafeList* managedReferenceIndexRemovalCount)
         {
-            if (!IsMainThread)
-                throw new InvalidOperationException("Must be called from the main thread");
+            AssertMainThread();
 
             ComponentType componentType = ComponentType.FromTypeIndex(typeIndex);
             using (var chunks = ChunkIterationUtility.CreateArchetypeChunkArray(archetypeList, Allocator.TempJob, ref filter, DependencyManager))
@@ -744,21 +925,51 @@ namespace Unity.Entities
         {
             Assert.IsTrue(componentType.IsSharedComponent);
 
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
             var archetypeChanges = EntityComponentStore->BeginArchetypeChangeTracking();
 
             StructuralChange.AddSharedComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex, sharedComponentIndex);
 
             EntityComponentStore->EndArchetypeChangeTracking(archetypeChanges, EntityQueryManager);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
         }
 
-        private void PlaybackManagedChanges()
+        private void PlaybackManagedChangesMono()
         {
-            if (!EntityComponentStore->ManagedChangesTracker.Empty)
-                ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
+            ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
         }
+
+        [BurstDiscard]
+        private void PlaybackManagedDirectly(ref bool didTheThing)
+        {
+            didTheThing = true;
+            PlaybackManagedChangesMono();
+        }
+
+        internal void PlaybackManagedChanges()
+        {
+            if (EntityComponentStore->ManagedChangesTracker.Empty)
+                return;
+
+#if !UNITY_DOTSRUNTIME
+            {
+                bool monoDitIt = false;
+                PlaybackManagedDirectly(ref monoDitIt);
+                if (monoDitIt)
+                    return;
+            }
+
+            fixed (void* self = &this)
+            {
+                new FunctionPointer<PlaybackManagedDelegate>(s_ManagedPlaybackTrampoline.Data).Invoke((IntPtr)self);
+            }
+#else
+            PlaybackManagedChangesMono();
+#endif
+        }
+
 
         /// <summary>
         /// EntityManager.BeforeStructuralChange must be called before invoking this.
@@ -775,6 +986,7 @@ namespace Unity.Entities
             StructuralChange.AddSharedComponentChunks(EntityComponentStore, (ArchetypeChunk*)NativeArrayUnsafeUtility.GetUnsafePtr(chunks), chunks.Length, componentType.TypeIndex, sharedComponentIndex);
         }
 
+        [NotBurstCompatible]
         public T GetSharedComponentData<T>(Entity entity, ManagedComponentStore managedComponentStore) where T : struct, ISharedComponentData
         {
             var typeIndex = TypeManager.GetTypeIndex<T>();
@@ -784,9 +996,10 @@ namespace Unity.Entities
             return managedComponentStore.GetSharedComponentData<T>(sharedComponentIndex);
         }
 
+        [NotBurstCompatible]
         public void SetSharedComponentData<T>(Entity entity, T componentData, ManagedComponentStore managedComponentStore) where T : struct, ISharedComponentData
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             var typeIndex = TypeManager.GetTypeIndex<T>();
@@ -795,13 +1008,15 @@ namespace Unity.Entities
 
             var newSharedComponentDataIndex = managedComponentStore.InsertSharedComponent(componentData);
             EntityComponentStore->SetSharedComponentDataIndex(entity, componentType, newSharedComponentDataIndex);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             managedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
             managedComponentStore.RemoveReference(newSharedComponentDataIndex);
         }
 
+        [NotBurstCompatible]
         public void SetSharedComponentDataBoxedDefaultMustBeNull(Entity entity, int typeIndex, int hashCode, object componentData, ManagedComponentStore managedComponentStore)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             EntityComponentStore->AssertEntityHasComponent(entity, typeIndex);
@@ -812,6 +1027,7 @@ namespace Unity.Entities
 
             var componentType = ComponentType.FromTypeIndex(typeIndex);
             EntityComponentStore->SetSharedComponentDataIndex(entity, componentType, newSharedComponentDataIndex);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
             ManagedComponentStore.RemoveReference(newSharedComponentDataIndex);
         }
@@ -827,6 +1043,7 @@ namespace Unity.Entities
         /// <param name="typeIndex"></param>
         /// <param name="hashCode"></param>
         /// <param name="componentData"></param>
+        [NotBurstCompatible]
         public void SetSharedComponentDataBoxedDefaultMustBeNullDuringStructuralChange(Entity entity, int typeIndex, int hashCode, object componentData, UnsafeList* managedReferenceIndexRemovalCount)
         {
             EntityComponentStore->AssertEntityHasComponent(entity, typeIndex);
@@ -841,6 +1058,7 @@ namespace Unity.Entities
             managedReferenceIndexRemovalCount->Add(newSharedComponentDataIndex);
         }
 
+        [BurstCompatible(GenericTypeArguments = new[] { typeof(BurstCompatibleBufferElement) })]
         public DynamicBuffer<T> GetBuffer<T>(Entity entity
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             , AtomicSafetyHandle safety, AtomicSafetyHandle arrayInvalidationSafety
@@ -856,7 +1074,7 @@ namespace Unity.Entities
                     $"GetBuffer<{typeof(T)}> may not be IComponentData or ISharedComponentData; currently {TypeManager.GetTypeInfo<T>().Category}");
 #endif
 
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 DependencyManager->CompleteReadAndWriteDependency(typeIndex);
 
             BufferHeader* header =
@@ -876,7 +1094,7 @@ namespace Unity.Entities
 
         public void SetBufferRaw(Entity entity, int componentTypeIndex, BufferHeader* tempBuffer, int sizeInChunk)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 DependencyManager->CompleteReadAndWriteDependency(componentTypeIndex);
 
             EntityComponentStore->SetBufferRawWithValidation(entity, componentTypeIndex, tempBuffer, sizeInChunk);
@@ -892,11 +1110,12 @@ namespace Unity.Entities
 
         internal void InstantiateInternal(Entity srcEntity, Entity* outputEntities, int count)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
             EntityComponentStore->AssertEntitiesExist(&srcEntity, 1);
             EntityComponentStore->AssertCanInstantiateEntities(srcEntity, outputEntities, count);
             StructuralChange.InstantiateEntities(EntityComponentStore, &srcEntity, outputEntities, count);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
         }
 
@@ -914,29 +1133,37 @@ namespace Unity.Entities
             EntityComponentStore->InstantiateWithValidation(srcEntity, outputEntities, count);
         }
 
-        internal void InstantiateInternal(Entity* srcEntities, Entity* outputEntities, int count, int outputCount, bool removePrefab)
+        [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]
+        private static void AssertCountsMatch(int count, int outputCount)
         {
-            if (IsMainThread)
-                BeforeStructuralChange();
-
-#if ENABLE_UNITY_COLLECTIONS_CHECKS
             if (count != outputCount)
                 throw new System.ArgumentException($"srcEntities.Length ({count}) and outputEntities.Length (({outputCount})) must be the same.");
-#endif
+        }
+
+        internal void InstantiateInternal(Entity* srcEntities, Entity* outputEntities, int count, int outputCount, bool removePrefab)
+        {
+            if (!IsInExclusiveTransaction)
+                BeforeStructuralChange();
+
+            AssertCountsMatch(count, outputCount);
 
             EntityComponentStore->AssertEntitiesExist(srcEntities, count);
             EntityComponentStore->AssertCanInstantiateEntities(srcEntities, count, removePrefab);
             EntityComponentStore->InstantiateEntities(srcEntities, outputEntities, count, removePrefab);
-            ManagedComponentStore.Playback(ref EntityComponentStore->ManagedChangesTracker);
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
+            PlaybackManagedChanges();
         }
 
         internal void DestroyEntityInternal(Entity* entities, int count)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             EntityComponentStore->AssertValidEntities(entities, count);
+
             EntityComponentStore->DestroyEntities(entities, count);
+
+            EntityComponentStore->InvalidateChunkListCacheForChangedArchetypes();
             PlaybackManagedChanges();
         }
 
@@ -955,7 +1182,7 @@ namespace Unity.Entities
 
         public void SwapComponents(ArchetypeChunk leftChunk, int leftIndex, ArchetypeChunk rightChunk, int rightIndex)
         {
-            if (IsMainThread)
+            if (!IsInExclusiveTransaction)
                 BeforeStructuralChange();
 
             var globalSystemVersion = EntityComponentStore->GlobalSystemVersion;
@@ -964,14 +1191,30 @@ namespace Unity.Entities
                 globalSystemVersion, globalSystemVersion);
         }
 
+        [BurstCompatible(GenericTypeArguments = new[] { typeof(BurstCompatibleBufferElement) })]
+        public BufferTypeHandle<T> GetBufferTypeHandle<T>(bool isReadOnly)
+            where T : struct, IBufferElementData
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            var typeIndex = TypeManager.GetTypeIndex<T>();
+            return new BufferTypeHandle<T>(
+                DependencyManager->Safety.GetSafetyHandleForBufferTypeHandle(typeIndex, isReadOnly),
+                DependencyManager->Safety.GetBufferHandleForBufferTypeHandle(typeIndex),
+                isReadOnly, EntityComponentStore->GlobalSystemVersion);
+#else
+            return new BufferTypeHandle<T>(isReadOnly, EntityComponentStore->GlobalSystemVersion);
+#endif
+        }
+
+        [Obsolete("GetArchetypeChunkBufferType has been renamed to GetBufferTypeHandle (RemovedAfter 2020-08-01).")]
         public ArchetypeChunkBufferType<T> GetArchetypeChunkBufferType<T>(bool isReadOnly)
             where T : struct, IBufferElementData
         {
 #if ENABLE_UNITY_COLLECTIONS_CHECKS
             var typeIndex = TypeManager.GetTypeIndex<T>();
             return new ArchetypeChunkBufferType<T>(
-                DependencyManager->Safety.GetSafetyHandleForArchetypeChunkBufferType(typeIndex, isReadOnly),
-                DependencyManager->Safety.GetBufferHandleForArchetypeChunkBufferType(typeIndex),
+                DependencyManager->Safety.GetSafetyHandleForBufferTypeHandle(typeIndex, isReadOnly),
+                DependencyManager->Safety.GetBufferHandleForBufferTypeHandle(typeIndex),
                 isReadOnly, EntityComponentStore->GlobalSystemVersion);
 #else
             return new ArchetypeChunkBufferType<T>(isReadOnly, EntityComponentStore->GlobalSystemVersion);
@@ -985,7 +1228,7 @@ namespace Unity.Entities
         {
             dataAccess.EntityComponentStore->AssertEntityHasComponent(entity, typeIndex);
 
-            if (dataAccess.IsMainThread)
+            if (!dataAccess.IsInExclusiveTransaction)
                 dataAccess.DependencyManager->CompleteReadAndWriteDependency(typeIndex);
 
             return (int*)dataAccess.EntityComponentStore->GetComponentDataWithTypeRW(entity, typeIndex, dataAccess.EntityComponentStore->GlobalSystemVersion);
