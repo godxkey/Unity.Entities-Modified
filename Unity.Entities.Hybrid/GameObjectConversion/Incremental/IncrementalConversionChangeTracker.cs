@@ -10,9 +10,9 @@ namespace Unity.Entities
     internal class IncrementalConversionChangeTracker : IDisposable
     {
         internal NativeList<int> DeletedInstanceIds;
-        internal NativeHashSet<int> ChangedInstanceIds;
-        internal NativeHashSet<int> ReconvertHierarchyInstanceIds;
-        internal NativeHashMap<int, int> ParentChangeInstanceIds;
+        internal NativeParallelHashSet<int> ChangedInstanceIds;
+        internal NativeParallelHashSet<int> ReconvertHierarchyInstanceIds;
+        internal NativeParallelHashMap<int, int> ParentChangeInstanceIds;
         internal NativeList<int> ChangedAssets;
         internal NativeList<int> DeletedAssets;
         internal readonly HashSet<Component> ComponentChanges;
@@ -21,9 +21,9 @@ namespace Unity.Entities
         public IncrementalConversionChangeTracker()
         {
             DeletedInstanceIds = new NativeList<int>(Allocator.Persistent);
-            ChangedInstanceIds = new NativeHashSet<int>(10, Allocator.Persistent);
-            ReconvertHierarchyInstanceIds = new NativeHashSet<int>(10, Allocator.Persistent);
-            ParentChangeInstanceIds = new NativeHashMap<int, int>(10, Allocator.Persistent);
+            ChangedInstanceIds = new NativeParallelHashSet<int>(10, Allocator.Persistent);
+            ReconvertHierarchyInstanceIds = new NativeParallelHashSet<int>(10, Allocator.Persistent);
+            ParentChangeInstanceIds = new NativeParallelHashMap<int, int>(10, Allocator.Persistent);
             ChangedAssets = new NativeList<int>(Allocator.Persistent);
             DeletedAssets = new NativeList<int>(Allocator.Persistent);
             ComponentChanges = new HashSet<Component>();
@@ -133,7 +133,7 @@ namespace Unity.Entities
         /// Maps instance IDs of GameObjects to the instance ID of their last recorded parent if the parenting changed.
         /// Note that this might included instance IDs of destroyed GameObjects on either side.
         /// </summary>
-        public NativeHashMap<int, int> ParentChangeInstanceIds;
+        public NativeParallelHashMap<int, int> ParentChangeInstanceIds;
 
         /// <summary>
         /// Contains the instance IDs of all assets that were changed since the last conversion.
@@ -257,7 +257,7 @@ namespace Unity.Entities
             if (!ReconvertHierarchyInstanceIds.IsCreated)
                 ReconvertHierarchyInstanceIds = new NativeArray<int>(0, Allocator.TempJob);
             if (!ParentChangeInstanceIds.IsCreated)
-                ParentChangeInstanceIds = new NativeHashMap<int, int>(0, Allocator.TempJob);
+                ParentChangeInstanceIds = new NativeParallelHashMap<int, int>(0, Allocator.TempJob);
             if (!ChangedAssets.IsCreated)
                 ChangedAssets = new NativeArray<int>(0, Allocator.TempJob);
             if (!DeletedAssets.IsCreated)

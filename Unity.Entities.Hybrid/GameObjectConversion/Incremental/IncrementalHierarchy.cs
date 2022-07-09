@@ -39,12 +39,12 @@ namespace Unity.Entities.Conversion
         /// <summary>
         /// Maps the index of each element to the indices of its children.
         /// </summary>
-        public NativeMultiHashMap<int, int> ChildIndicesByIndex;
+        public NativeParallelMultiHashMap<int, int> ChildIndicesByIndex;
 
         /// <summary>
         /// Maps instance IDs to indices in the hierarchy.
         /// </summary>
-        public NativeHashMap<int, int> IndexByInstanceId;
+        public NativeParallelHashMap<int, int> IndexByInstanceId;
 
         public void Dispose()
         {
@@ -319,15 +319,7 @@ namespace Unity.Entities.Conversion
             if (hierarchy.InstanceId.Length == 0)
                 return;
             var objects = new List<UnityEngine.Object>();
-#if UNITY_2020_2_OR_NEWER
             Resources.InstanceIDToObjectList(hierarchy.InstanceId, objects);
-#else
-            {
-                var instances = hierarchy.InstanceId;
-                for (int i = 0; i < instances.Length; i++)
-                    objects.Add(UnityEditor.EditorUtility.InstanceIDToObject(instances[i]));
-            }
-#endif
             for (int i = 0; i < objects.Count; i++)
             {
                 var go = objects[i] as GameObject;
@@ -360,8 +352,8 @@ namespace Unity.Entities.Conversion
             hierarchy = new IncrementalHierarchy
             {
                 TransformArray = new TransformAccessArray(roots.Length),
-                ChildIndicesByIndex = new NativeMultiHashMap<int, int>(roots.Length, alloc),
-                IndexByInstanceId = new NativeHashMap<int, int>(roots.Length, alloc),
+                ChildIndicesByIndex = new NativeParallelMultiHashMap<int, int>(roots.Length, alloc),
+                IndexByInstanceId = new NativeParallelHashMap<int, int>(roots.Length, alloc),
                 InstanceId = new NativeList<int>(roots.Length, alloc),
                 ParentIndex = new NativeList<int>(roots.Length, alloc)
             };

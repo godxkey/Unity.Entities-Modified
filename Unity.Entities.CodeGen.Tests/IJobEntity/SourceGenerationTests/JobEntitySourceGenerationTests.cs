@@ -1,5 +1,4 @@
-﻿#if ROSLYN_SOURCEGEN_ENABLED
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
@@ -17,10 +16,12 @@ namespace Unity.Entities.CodeGen.Tests.SourceGenerationTests
             {
                 typeof(Unity.Entities.SystemBase),
                 typeof(Unity.Burst.BurstCompileAttribute),
+                typeof(Unity.Jobs.JobHandle),
                 typeof(Unity.Mathematics.float3),
                 typeof(Unity.Collections.ReadOnlyAttribute),
-                typeof(Unity.Collections.LowLevel.Unsafe.UnsafeUtility)
-            });
+                typeof(Unity.Collections.LowLevel.Unsafe.UnsafeUtility),
+                typeof(Unity.Collections.NativeList<>)
+            }, allowUnsafe: true);
 
             if (!isSuccess)
             {
@@ -32,4 +33,3 @@ namespace Unity.Entities.CodeGen.Tests.SourceGenerationTests
         }
     }
 }
-#endif

@@ -182,15 +182,17 @@ namespace Unity.Entities.Tests
         public void AddMultipleComponentsWithQuery_ExceedMaxSharedComponentsThrows()
         {
             var componentTypes = new ComponentTypes(new ComponentType[] {
-                typeof(EcsTestSharedComp), typeof(EcsTestSharedComp2), typeof(EcsTestSharedComp3), typeof(EcsTestSharedComp4),
-                typeof(EcsTestSharedComp5), typeof(EcsTestSharedComp6), typeof(EcsTestSharedComp7), typeof(EcsTestSharedComp8)
+                typeof(EcsTestSharedComp2), typeof(EcsTestSharedComp3), typeof(EcsTestSharedComp4),
+                typeof(EcsTestSharedComp5), typeof(EcsTestSharedComp6), typeof(EcsTestSharedComp7), typeof(EcsTestSharedComp8),
+                typeof(EcsTestSharedComp9), typeof(EcsTestSharedComp10), typeof(EcsTestSharedComp11), typeof(EcsTestSharedComp12),
+                typeof(EcsTestSharedComp13), typeof(EcsTestSharedComp14), typeof(EcsTestSharedComp15), typeof(EcsTestSharedComp16)
             });
 
-            Assert.AreEqual(8, EntityComponentStore.kMaxSharedComponentCount);   // if kMaxSharedComponentCount changes, need to update this test
+            Assert.AreEqual(16, EntityComponentStore.kMaxSharedComponentCount);   // if kMaxSharedComponentCount changes, need to update this test
 
-            var entity1 = m_Manager.CreateEntity(typeof(EcsTestData), typeof(EcsTestSharedComp9));
-            var entity2 = m_Manager.CreateEntity(typeof(EcsTestData), typeof(EcsTestData2));
-            var entity3 = m_Manager.CreateEntity(typeof(EcsTestData2));
+            var entity1 = m_Manager.CreateEntity(typeof(EcsTestSharedComp), typeof(EcsTestData), typeof(EcsTestSharedComp17));
+            var entity2 = m_Manager.CreateEntity(typeof(EcsTestSharedComp), typeof(EcsTestData), typeof(EcsTestData2));
+            var entity3 = m_Manager.CreateEntity(typeof(EcsTestSharedComp), typeof(EcsTestData2));
             var archetype1 = m_Manager.GetChunk(entity1).Archetype;
             var archetype2 = m_Manager.GetChunk(entity2).Archetype;
             var archetype3 = m_Manager.GetChunk(entity3).Archetype;
@@ -202,7 +204,7 @@ namespace Unity.Entities.Tests
             Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent(query, componentTypes));
 #else
             Assert.That(() => m_Manager.AddComponent(query, componentTypes), Throws.InvalidOperationException
-                  .With.Message.EqualTo("Cannot add more than 8 SharedComponent to a single Archetype"));
+                  .With.Message.StartsWith($"Cannot add more than {EntityComponentStore.kMaxSharedComponentCount} SharedComponent's to a single Archetype"));
 #endif
 
             m_ManagerDebug.CheckInternalConsistency();
@@ -238,13 +240,13 @@ namespace Unity.Entities.Tests
 
         private struct EcsTestDataHuge : IComponentData
         {
-            public FixedString4096 value0;
-            public FixedString4096 value1;
-            public FixedString4096 value2;
-            public FixedString4096 value3;
-            public FixedString4096 value4;
+            public FixedString4096Bytes value0;
+            public FixedString4096Bytes value1;
+            public FixedString4096Bytes value2;
+            public FixedString4096Bytes value3;
+            public FixedString4096Bytes value4;
 
-            public EcsTestDataHuge(FixedString4096 inValue)
+            public EcsTestDataHuge(FixedString4096Bytes inValue)
             {
                 value4 = value3 = value2 = value1 = value0 = inValue;
             }

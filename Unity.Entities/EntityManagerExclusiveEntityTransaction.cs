@@ -32,6 +32,25 @@ namespace Unity.Entities
         }
 
         /// <summary>
+        /// Check whether or not a new exclusive entity transaction can begin.
+        /// </summary>
+        /// <returns><see langword="true"/> if a new exclusive transaction can begin, <see langword="false"/> otherwise.</returns>
+        public bool CanBeginExclusiveEntityTransaction()
+        {
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            if (IsInExclusiveTransaction)
+                return false;
+            AtomicSafetyHandle.CheckExistsAndThrow(m_Safety);
+#endif
+
+            var access = GetUncheckedEntityDataAccess();
+            if (access->DependencyManager->IsInTransaction)
+                return false;
+            
+            return true;
+        }
+
+        /// <summary>
         /// Begins an exclusive entity transaction, which allows you to make structural changes inside a Job.
         /// </summary>
         /// <remarks>
@@ -58,7 +77,6 @@ namespace Unity.Entities
         #endif
 
             access->DependencyManager->BeginExclusiveTransaction();
-            access->m_IsInExclusiveTransaction = 1;
 
             var copy = this;
 
@@ -86,7 +104,6 @@ namespace Unity.Entities
             AtomicSafetyHandle.CheckWriteAndThrow(m_Safety);
         #endif
             m_EntityDataAccess->DependencyManager->EndExclusiveTransaction();
-            m_EntityDataAccess->m_IsInExclusiveTransaction = 0;
         }
 
         // ----------------------------------------------------------------------------------------------------------
@@ -109,9 +126,10 @@ namespace Unity.Entities
             where T : struct, ISharedComponentData
         {
             var componentType = ComponentType.ReadWrite<T>();
+            var archetypeChanges = m_EntityDataAccess->BeginStructuralChanges();
             int sharedComponentIndex = m_EntityDataAccess->InsertSharedComponent(componentData);
-            m_EntityDataAccess->AddSharedComponentData(chunks, sharedComponentIndex, componentType);
-            m_EntityDataAccess->RemoveSharedComponentReference(sharedComponentIndex);
+            m_EntityDataAccess->AddSharedComponentDataDuringStructuralChange(chunks, sharedComponentIndex, componentType);
+            m_EntityDataAccess->EndStructuralChanges(ref archetypeChanges);
         }
     }
 }

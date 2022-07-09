@@ -1,11 +1,10 @@
-﻿#if UNITY_2020_2_OR_NEWER
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Unity.Entities
 {
     [UpdateInGroup(typeof(ConversionSetupGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.GameObjectConversion)]
-    class SceneSectionIncrementalConversionSystem : SystemBase
+    partial class SceneSectionIncrementalConversionSystem : SystemBase
     {
         readonly Dictionary<int, int> m_Section = new Dictionary<int, int>();
         IncrementalChangesSystem m_Incremental;
@@ -63,4 +62,3 @@ namespace Unity.Entities
         }
     }
 }
-#endif

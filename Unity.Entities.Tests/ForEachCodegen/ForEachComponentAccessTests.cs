@@ -87,7 +87,7 @@ namespace Unity.Entities.Tests.ForEachCodegen
                         Entities.ForEach((ref EcsTestDataEntity tde) => { SetComponent(entity, new EcsTestData(){ value = 2 }); }).Schedule();
                         break;
                     case ScheduleType.ScheduleParallel:
-                        Entities.ForEach((ref EcsTestDataEntity tde) => { SetComponent(entity, new EcsTestData(){ value = 2 }); }).ScheduleParallel();
+                        // Flagged as an DC0063 error at compile-time with sourcegen
                         break;
                 }
 
@@ -131,11 +131,7 @@ namespace Unity.Entities.Tests.ForEachCodegen
                         }).Schedule();
                         break;
                     case ScheduleType.ScheduleParallel:
-                        Entities.ForEach((ref EcsTestDataEntity tde) =>
-                        {
-                            var cdfe = GetComponentDataFromEntity<EcsTestData>(false);
-                            cdfe[entity] = new EcsTestData(){ value = 2 };
-                        }).ScheduleParallel();
+                        // Flagged as an DC0063 error at compile-time with sourcegen
                         break;
                 }
 
@@ -168,6 +164,17 @@ namespace Unity.Entities.Tests.ForEachCodegen
                 Dependency.Complete();
             }
 
+            public void SetComponentViaNamedArgument_SetsValue()
+            {
+                Entities
+                    .WithoutBurst()
+                    .ForEach((Entity entity, in EcsTestDataEntity tde) =>
+                    {
+                        SetComponent(component: new EcsTestData() { value = 2 }, entity: entity);
+                    }).Schedule();
+                Dependency.Complete();
+            }
+
             public void GetComponentFromStaticField_GetsValue()
             {
                 Entities.ForEach((ref EcsTestDataEntity tde) => { tde.value0 = GetComponent<EcsTestData>(tde.value1).value; }).Schedule();
@@ -189,8 +196,7 @@ namespace Unity.Entities.Tests.ForEachCodegen
                     .WithoutBurst()
                     .ForEach((Entity entity, in EcsTestDataEntity tde) =>
                     {
-                        var val = GetComponent<EcsTestData>(tde.value1).value;
-                        SetComponent(entity, new EcsTestData(val));
+                        SetComponent(entity, GetComponent<EcsTestData>(tde.value1));
                     }).Schedule();
                 Dependency.Complete();
             }
@@ -346,12 +352,6 @@ namespace Unity.Entities.Tests.ForEachCodegen
         }
 
         [Test]
-        public void SetComponent_Throws([Values(ScheduleType.ScheduleParallel)] ScheduleType scheduleType)
-        {
-            Assert.Throws<InvalidOperationException>(() => TestSystem.SetComponent_SetsValue(TestEntity1, scheduleType));
-        }
-
-        [Test]
         public void GetComponentThroughGetComponentDataFromEntity_GetsValue([Values] ScheduleType scheduleType)
         {
             TestSystem.GetComponentThroughGetComponentDataFromEntity_GetsValue(TestEntity2, scheduleType);
@@ -363,12 +363,6 @@ namespace Unity.Entities.Tests.ForEachCodegen
         {
             TestSystem.SetComponentThroughGetComponentDataFromEntity_SetsValue(TestEntity1, scheduleType);
             Assert.AreEqual(2, m_Manager.GetComponentData<EcsTestData>(TestEntity1).value);
-        }
-
-        [Test]
-        public void SetComponentThroughGetComponentDataFromEntity_Throws([Values(ScheduleType.ScheduleParallel)] ScheduleType scheduleType)
-        {
-            Assert.Throws<InvalidOperationException>(() => TestSystem.SetComponentThroughGetComponentDataFromEntity_SetsValue(TestEntity1, scheduleType));
         }
 
         [Test]
@@ -390,6 +384,13 @@ namespace Unity.Entities.Tests.ForEachCodegen
         {
             TestSystem.GetComponentFromComponentDataField_GetsValue();
             Assert.AreEqual(2, m_Manager.GetComponentData<EcsTestDataEntity>(TestEntity1).value0);
+        }
+
+        [Test]
+        public void SetComponentViaNamedArgument_SetsValue()
+        {
+            TestSystem.SetComponentViaNamedArgument_SetsValue();
+            Assert.AreEqual(2, m_Manager.GetComponentData<EcsTestData>(TestEntity1).value);
         }
 
         [Test]

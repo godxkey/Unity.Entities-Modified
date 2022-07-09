@@ -19,6 +19,7 @@ namespace Unity.Entities
             [ReadOnly] public NativeArray<ArchetypeChunk> SrcChunks;
             [ReadOnly] public NativeArray<ArchetypeChunk> DstChunks;
 
+            [NativeDisableUnsafePtrRestriction] public EntityComponentStore* SrcEntityComponentStore;
             [NativeDisableUnsafePtrRestriction] public EntityComponentStore* DstEntityComponentStore;
 
             public void Execute(int index)
@@ -126,14 +127,14 @@ namespace Unity.Entities
 
             public void Execute()
             {
-                var indices = new UnsafeHashSet<int>(128, Allocator.Temp);
+                var indices = new UnsafeParallelHashSet<int>(128, Allocator.Temp);
                 for (int i = 0; i < Chunks.Length; i++)
                     HandleChunk(Chunks[i].m_Chunk, ref indices);
 
                 SharedComponentIndices.AddRange(indices.ToNativeArray(Allocator.Temp));
             }
 
-            void HandleChunk(Chunk* srcChunk, ref UnsafeHashSet<int> indices)
+            void HandleChunk(Chunk* srcChunk, ref UnsafeParallelHashSet<int> indices)
             {
                 var srcArchetype = srcChunk->Archetype;
                 var n = srcArchetype->NumSharedComponents;
@@ -162,14 +163,14 @@ namespace Unity.Entities
             {
                 var dstEntityComponentStore = DstEntityManager.GetCheckedEntityDataAccess()->EntityComponentStore;
 
-                var remapping = new UnsafeHashMap<int, int>(SrcSharedComponentIndices.Length, Allocator.Temp);
+                var remapping = new UnsafeParallelHashMap<int, int>(SrcSharedComponentIndices.Length, Allocator.Temp);
                 for (int i = 0; i < SrcSharedComponentIndices.Length; i++)
                     remapping.Add(SrcSharedComponentIndices[i], DstSharedComponentIndices[i]);
                 for (int i = 0; i < Chunks.Length; i++)
                     HandleChunk(i, dstEntityComponentStore, remapping);
             }
 
-            void HandleChunk(int idx, EntityComponentStore* dstEntityComponentStore, UnsafeHashMap<int, int> sharedComponentRemap)
+            void HandleChunk(int idx, EntityComponentStore* dstEntityComponentStore, UnsafeParallelHashMap<int, int> sharedComponentRemap)
             {
                 var srcChunk = Chunks[idx].m_Chunk;
                 var numSharedComponents = srcChunk->Archetype->NumSharedComponents;
@@ -267,7 +268,7 @@ namespace Unity.Entities
                 var dstChunk = cloned[i].m_Chunk;
                 var dstArchetype = dstChunk->Archetype;
                 var numManagedComponents = dstArchetype->NumManagedComponents;
-                var hasHybridComponents = dstArchetype->HasHybridComponents;
+                var hasCompanionComponents = dstArchetype->HasCompanionComponents;
                 for (int t = 0; t < numManagedComponents; ++t)
                 {
                     int indexInArchetype = t + dstChunk->Archetype->FirstManagedComponent;
@@ -275,7 +276,7 @@ namespace Unity.Entities
                     var a = (int*) (dstChunk->Buffer + offset);
                     int count = dstChunk->Count;
 
-                    if (hasHybridComponents)
+                    if (hasCompanionComponents)
                     {
                         // We consider hybrid components as always different, there's no reason to clone those at this point.
                         var typeCategory = TypeManager.GetTypeInfo(dstChunk->Archetype->Types[indexInArchetype].TypeIndex).Category;
@@ -299,10 +300,15 @@ namespace Unity.Entities
             dstAccess->EntityComponentStore->EnsureCapacity(srcEntityManager.EntityCapacity);
             dstAccess->EntityComponentStore->CopyNextFreeEntityIndex(srcAccess->EntityComponentStore);
 
+#if !DOTS_DISABLE_DEBUG_NAMES
+            dstAccess->EntityComponentStore->CopyAndUpdateNameByEntity(srcAccess->EntityComponentStore);
+#endif
+
             new PatchAndAddClonedChunks
             {
                 SrcChunks = chunks,
                 DstChunks = cloned,
+                SrcEntityComponentStore = srcAccess->EntityComponentStore,
                 DstEntityComponentStore = dstAccess->EntityComponentStore
             }.Schedule(chunks.Length, 64).Complete();
 

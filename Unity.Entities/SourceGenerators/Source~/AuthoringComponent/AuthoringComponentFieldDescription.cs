@@ -2,12 +2,13 @@
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Unity.Entities.SourceGen.Common;
 
-namespace Unity.Entities.SourceGen
+namespace Unity.Entities.SourceGen.AuthoringComponent
 {
-    internal class AuthoringComponentFieldDescription
+    class AuthoringComponentFieldDescription
     {
         public IFieldSymbol FieldSymbol;
         public FieldType FieldType;
+        public Location Location;
 
         public static AuthoringComponentFieldDescription From(VariableDeclaratorSyntax syntaxNode, GeneratorExecutionContext context)
         {
@@ -15,12 +16,13 @@ namespace Unity.Entities.SourceGen
 
             return new AuthoringComponentFieldDescription
             {
+                Location = syntaxNode.GetLocation(),
                 FieldSymbol = fieldSymbol,
                 FieldType = GetFieldType(fieldSymbol)
             };
         }
 
-        private static FieldType GetFieldType(IFieldSymbol fieldSymbol)
+        static FieldType GetFieldType(IFieldSymbol fieldSymbol)
         {
             if (fieldSymbol.Type.Is(nameSpace: "Entities", typeName: "Entity"))
             {

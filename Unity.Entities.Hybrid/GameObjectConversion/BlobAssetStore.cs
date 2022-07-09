@@ -11,7 +11,7 @@ namespace Unity.Entities
     /// Purpose of this class is to provide a consistent cache of BlobAsset object in order to avoid rebuilding them when it is not necessary
     /// </summary>
     /// <remarks>
-    /// Right now the lifetime scope of this cache is bound to the LiveLinkDiffGenerator's one and it is scoped by SubScene.
+    /// Right now the lifetime scope of this cache is bound to the LiveConversionDiffGenerator's one and it is scoped by SubScene.
     /// In other words the cache is created when we enter edit mode for a given SubScene and it is released when we close edit mode.
     /// And instance of this cache is exposed in <see cref="Unity.Entities.GameObjectConversionSettings"/> to allow users to query and avoid rebuilding assets.
     /// During conversion process the user must rely on the <see cref="BlobAssetComputationContext{TS,TB}"/> to associate the BlobAsset with their corresponding Authoring UnityObject and to determine which ones are to compute.
@@ -22,9 +22,9 @@ namespace Unity.Entities
     {
         public BlobAssetStore()
         {
-            m_BlobAssets = new NativeHashMap<Hash128, BlobAssetReferenceData>(128, Allocator.Persistent);
-            m_HashByOwner = new NativeMultiHashMap<int, Hash128>(128, Allocator.Persistent);
-            m_RefCounterPerBlobHash = new NativeHashMap<Hash128, int>(128, Allocator.Persistent);
+            m_BlobAssets = new NativeParallelHashMap<Hash128, BlobAssetReferenceData>(128, Allocator.Persistent);
+            m_HashByOwner = new NativeParallelMultiHashMap<int, Hash128>(128, Allocator.Persistent);
+            m_RefCounterPerBlobHash = new NativeParallelHashMap<Hash128, int>(128, Allocator.Persistent);
         }
 
         /// <summary>
@@ -178,7 +178,7 @@ namespace Unity.Entities
 
         static Hash128 ComputeKeyAndTypeHash(Hash128 key, Type type)
         {
-            return new Hash128(math.hash(new uint4x2 { c0 = key.Value, c1 = new uint4(ComputeTypeHash(type))}));
+            return new Hash128(math.hashwide(new uint4x2 { c0 = key.Value, c1 = new uint4(ComputeTypeHash(type))}));
         }
 
         /// <summary>
@@ -197,9 +197,9 @@ namespace Unity.Entities
         /// </remarks>
         internal int CacheMiss => m_CacheMiss;
 
-        NativeHashMap<Hash128, BlobAssetReferenceData> m_BlobAssets;
-        NativeHashMap<Hash128, int> m_RefCounterPerBlobHash;
-        NativeMultiHashMap<int, Hash128> m_HashByOwner;
+        NativeParallelHashMap<Hash128, BlobAssetReferenceData> m_BlobAssets;
+        NativeParallelHashMap<Hash128, int> m_RefCounterPerBlobHash;
+        NativeParallelMultiHashMap<int, Hash128> m_HashByOwner;
 
         int m_CacheHit;
         int m_CacheMiss;

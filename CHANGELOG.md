@@ -1,4 +1,413 @@
-# Change log
+# Changelog
+
+## [0.51.0] - 2022-05-04
+
+### Changed
+
+* Package Dependencies
+  * `com.unity.jobs` to version `0.51.0`
+  * `com.unity.platforms` to version `0.51.0`
+  * `com.unity.mathematics` to version `1.2.6`
+  * `com.unity.collections` to version `1.3.1`
+  * `com.unity.burst` to version `1.6.6`
+* Increased the maximum number of shared components per entity from 8 to 16.
+* Updated dependency on version of com.unity.roslyn package that will work with both Unity 2020 and Unity 2021.
+
+### Fixed
+
+* DOTS Entities throws a compilation error when using named arguments.
+* Fix Create -> ECS -> System template now adds partial keyword.
+* Fixed a possible memory stomp triggered by specific sequences of `ComponentDataFromEntity` or `BufferFromEntity` calls.
+* EntityQuery.CopyFromComponentDataArray<T>() and EntityQuery.CopyFromComponentDataArrayAsync<T>() now correctly set the change version of any chunks they write to.
+* If the value of the Parent component of an entity is changed while the previous parent entity was destroyed at the same time, an exception could be thrown during the next update of the transform system.
+* Changes to ComponentData made outside of Systems will be properly detected by EntityQueries with changed version filters.
+
+### Added
+
+* New `BufferTypeHandle.Update()` method. Rather than creating new type handles every frame in `OnUpdate()`, it is more efficient to create the handle once in a system's `OnCreate()`, cache it as a member on the system, and call its `.Update()` method from `OnUpdate()` before using the handle.
+* SystemBase.GetEntityQuery can now take an EntityQueryDescBuilder.
+
+
+
+## [0.50.1-preview.3] - 2022-04-28
+
+### Changed
+
+Release preparations, no functional changes.
+
+## [0.50.1-preview.2] - 2022-04-20
+
+### Changed
+
+Release preparations, no functional changes.
+
+
+## [0.50.1-preview.1] - 2022-04-07
+
+### Added
+
+* Documentation on EntityCommandBuffer public functions including ParallelWriter and EntityCommandBufferManagedComponentExtensions.
+* Hybrid assemblies will not be included in DOTS Runtime builds.
+* `[WithAll]` Attribute that can be added to a struct that implements IJobEntity. Adding additional required components to the existing execute parameter required components.
+* `[WithNone]` Attribute that can be added to a struct that implements IJobEntity. Specifying which components shouldn't be on the entity found by the query.
+* `[WithAny]` Attribute that can be added to a struct that implements IJobEntity. Specifying that the entity found by this query should have at least one of these components.
+* `[WithChangeFilter]` Attribute that can be added to a struct that implements IJobEntity, as well as on component parameters within the signature of the execute method. This makes it so that the query only runs on entities, which has marked a change on the component specified by the `[WithChangeFilter]`.
+* `[WithEntityQueryOptions]` Attribute that can be added to a struct that implements IJobEntity. Enabling you to query on disabled entities, prefab entities, and use write groups on entities.
+* Diagnostic suppressor to ignore specific generation of CS0282 warnings due to codegen.
+* SystemBase.GetBuffer takes an optional isReadOnly parameter.
+
+### Changed
+
+* DOTS Hierarchy now display SubScenes' state (opened, livelinked, closed or not loaded).
+* When using `EntityManager.SetName` with a managed `string` as a parameter, if a string longer than 61 characters is used, the string will be truncated to fit within an `EntityName`,
+* Improved the performance of the `EntityQuery` matching chunk cache in applications with many empty archetypes.
+* Removed `IJobForeach`, due to long notice of deprecation
+* Changed `LiveLinkPatcher` and `LiveLinkPlayerSystem` to use `IJobEntityBatch`, due to removal of `IJobForeach`
+* Changed docs from `IJobForeach` and `IJobChunk` to refer to `IJobEntity`, and `IJobEntityBatch` respectivly
+* Changed IJE out of `DOTS_EXPERIMENTAL`
+* Update dependency on com.unity.roslyn to 0.1.3-preview (no longer ignore CS0282 warnings globally).
+* Updated docs explaining how to use IJobEntity.
+* Updated com.unity.roslyn to `0.2.1-preview`
+* CheckDisposed method in EntityQueryEnumerator is now public
+* The Current property for a generated Aspect Enumerator now has a conditional CheckDisposed call to identify when the property is being accessed with a disposed enumerator instance
+* SystemBase.GetBuffer registers a job dependency for the IBufferElementData type specified.
+
+### Deprecated
+
+### Removed
+
+* Remove the LiveLink feature and its build component.
+* DOTS Compiler Inspector. Functionality is now available via viewing generated code directly from Temp/GeneratedCode in the project directory.
+
+### Fixed
+
+* Bug with EntityCommandBuffer removing multiple components from multiple entities when the number of entities was more than 10.
+* Defining `UNITY_DOTS_DEBUG` in standalone builds no longer triggers false positives from `AssertValidArchetype()`.
+* When setting many long strings using `EntityManager.SetName`, the editor will properly handle the storage of these names.
+* `EntityQuery.ToComponentDataArray<T>()` and `EntityQuery.CopyFromComponentDataArray<T>()` now detect potential race conditions against running jobs which access the component `T`. These jobs must be completed before the `EntityQuery` methods are called.
+* WorldSystemFilter, DisableAutoCreation, and AlwaysUpdateSystem attributes working with ISystem systems
+* Interface implemented execute methods now work with IJobEntity. Before this point you couldn't make an interface of `interface ITranslationExecute { void Execute(ref Translation translation) }` and implement it in an IJobEntity: `partial struct TranslationJob : IJobEntity, ITranslationExecute { void Execute(ref Translation translation) {} }`
+* `.Schedule` and `.ScheduleParallel` Invocations for IJobEntity without a jobhandle now matches Entities.ForEach automatic  chain `SystemBase.Dependency` handling
+* Dangling files left after a build using buildconfigs under certain circumstances
+* Remove the double registers of world allocator when creating a world.
+* Improved performance of Source Generators when run in IDEs.
+* `ExclusiveEntityTransaction.AddComponent` and `ExclusiveEntityTransaction.RemoveComponent` will no longer throw  with the error message of `Must be called from the main thread`
+* SGICE002 Issue with nesting `SetComponent(GetComponent)` for replaced syntax in Entities.ForEach.
+* "System" in namespace causing issues with Entities.ForEach and other codegen.
+* use of WithDisposeOnCompletion with Job.WithCode if a `using System.Collections` is missing.
+* `EntityQuery.Singleton` methods work correctly when the query has multiple required component data
+* `EntityQuery.ToEntityArray()`, `EntityQuery.ToComponentDataArray<T>()` and `EntityQuery.CopyFromComponentDataArray<T>()` now complete any jobs running against the query's component types before performing the requested operation. This fixes a race condition introduced in Entities 0.17 (and present in Entities 0.50).
+* `IJobEntity` inside nested struct now works.
+* `IJobEntity` now works inside namespaces that have `using` statements.
+* Fixes Issue where UnityEngine.Component didn't work as ManagedComponents for IJobEntity.
+
+
+## [0.50.0] - 2021-09-17
+
+### Added
+
+* **Window > DOTS > Entities** window to show all Entities in a world in real time, with ability to search, select each, and inspect it via the Inspector.
+* **Window > DOTS > Components** window to show all Component types, with ability to search, select each, and inspect it via the Inspector.
+* **Window > DOTS > Systems** window to show all Systems running in a world, categorized by System Group, with ability to search, select each, and inspect it via the Inspector.
+* Introduced two new ECS specific **Window > Analysis > Profiler** modules:   * **Entities Structural Changes** profiler module can record which world/system produced a structural change, and how much time it cost per frame.   * **Entities Memory** profiler module can record which world/system allocates memory chunks, with additional details per archetype.
+* `ArchetypeChunk.GetComponentDataPtrRO()` and `ArchetypeChunk.GetComponentDataPtrRW()` provide unsafe raw access to a chunk's component data, as a lower-overhead alternative to `ArchetypeChunk.GetNativeArray()`
+* `ComponentTypeHandle.Update()` allows `ComponentTypeHandle`s to be created once at system creation time, and incrementally updated each frame before use.
+* Adds clearer message when TypeManager hasn't been initialized yet, instead of only reporting a component type we don't know about has been requested.
+* Disabled entities in Entity Window now have the same style as the disabled gameobjects in the gameobject hierarchy
+* Go-to button to update Inspector content to reflect selected system and highlight the system in the Systems window if there is one open.
+* It's now possible to specify an alignment when allocating an array with BlobBuilder
+* Upgraded to burst 1.5.2
+* Added go-to buttons to update Inspector content to reflect selected component and highlight the component in the Components window if there is one open.
+* Routines to create unmanaged systems on worlds were made available for public use
+* It's now possible for a scene to contain weak asset references to other scenes and prefabs. All referenced scenes and prefabs will automatically be included in a player build. The sample in "EntitiesSamples/Assets/Advanced/WeakAssetReferences" shows how to use weak asset references to scenes and prefabs.
+* Incremental conversion now tracks GameObject names to rename Entities when they change.
+* New method `CanBeginExclusiveEntityTransaction` on `EntityManager` to check whether or not a new exclusive entity transaction can be made.
+* Wrapper functions are added in CollectionHelper to create/allocate NativeArray from custom allocator
+* Entities.ForEach() will now accept a lambda with no parameters.
+* WithSharedComponentFilter now also works with two shared component parameters.
+* `EntityCommandBuffer` has an `IsEmpty` property, which returns true if at least one command has been successfully recorded.
+* TryGetComponent in ComponentDataFromEntity
+* TryGetBuffer in BufferFromEntity
+* Entities journaling, which can record ECS past events and inspected from the static class `EntitiesJournaling` properties.
+* Allow for easier viewing of `EntityCommandBuffer` within an IDE through a new debug proxy.
+* Within an `EntityCommandBufferDebugView`, each command will have a summary of the action performed before expanding the command.
+* SystemRef<T>.Update to allow updating unmanaged systems manually.
+* Support WithScheduleGranularity with Entities.ForEach to allow per-entity scheduling
+* `EntityCommandBuffer.Instantiate()` can now instantiate more than one `Entity` in a single command, writing the resulting entities to a `NativeArray<Entity>`.
+* Support for fully-bursted Entities.ForEach.Run in ISystemBase systems.
+* RateUtils.VariableRateManager to facilitate update rate
+* DefaultWorld.BeginVariableRateSimulationEntityCommandBufferSystem
+* DefaultWorld.VariableRateSimulationSystemGroup
+* DefaultWorld.EndVariableRateSimulationEntityCommandBufferSystem
+* Element EnableBlockFree is added to enum WorldFlags to indicate whether World.UpdateAllocator is enabled to free individual memory block.
+* `ComponentTypes` has a new constructor variant that takes a `FixedList128Bytes<ComponentType>`, suitable for use in Burst-compiled code.
+* `EntityCommandBuffer` has several new variants that target a `NativeArray<Entity>`, which may be more efficient in many cases than recording individual commands for individual entities.
+* New Archetypes window that can display current archetype memory usage.
+* IJob* types use SharedStatic so they can be burst compiled eventually
+* Add ability to add missing partials during generation if `DOTS_ADD_PARTIAL_KEYWORD` scripting define is set.
+
+### Changed
+
+* Added a fast path for `IJobEntityBatch.RunWithoutJobs()` and `IJobEntityBatchWithIndex.RunWithoutJobs()` where query filtering is disabled, resulting up to a 30% reduction in performance overhead.
+* Merged `com.unity.dots.editor` package into `com.unity.entities` package, effectively deprecating the DOTS Editor as a standalone package. All the DOTS Editor package functionality is now included when referencing the Entities package.
+* DOTS Runtime now uses source generators for codegen.
+* Make parts of EntityPatcher burst compatible to prepare for burst compilation of EntityPatcher for its performance improvement.
+* `Entity.Equals(object compare)` now returns false if the `compare` object is null, rather than throwing a `NullReferenceException`.
+* Made `DynamicBuffer` an always blittable type (even in the Editor with safety checks on), so that it can be passed by reference to Burst function pointers.
+* BlobAssetStore.ComputeKeyAndTypeHash hash calculation reduced chance of collision
+* Capped the maximum number of previewable GameObjects to 100 in the Entity Conversion Preview.
+* Capped the maximum number of additional entities shown to 250 in the Entity Conversion Preview.
+* Improved overall performance of the Entity Conversion Preview.
+* Source generators are now used as the default mode of codegen for Entities.ForEach and Generated Authoring Component.  These can be disabled with `SYSTEM_SOURCEGEN_DISABLED` and `AUTHORINGCOMPONENT_SOURCEGEN_DISABLED` scripting defines if necessary.  The largest change is that generated code can now be inspected and debugged (when not bursted).  Generated code lives in Temp/GeneratedCode and can be stepped into with both Visual Studio and Rider.
+* Documentation to highlight necessary prerequisites in the Build Configuration for making a profilable build.
+* Entities window now shows prefab entities with a style similar to the one in the GameObject hierarchy
+* Systems in the Entity inspector relationships tab are now sorted by scheduling order instead of creation order.
+* Subscene headers are now loaded asynchronously and will no longer stall the main thread while loading.
+* Performance of LiveTweaking has been improved.
+* EntityDiffer capture entity changes when only entity's name is changed.
+* With an IDE debugger, EntityQuery will present more information related to it. The raw view
+* Debugging output for a `ComponentType` will present clearer info.
+* The `batchesPerChunk` parameter to `IJobEntityBatch.ScheduleParallel()` has been replaced with a new `ScheduleGranularity` enum. Pass `ScheduleGranularity.Chunk` to distribute work to worker threads at the level of entire chunks (the default behavior). Pass `ScheduleGranularity.Entity` to distribute individual entities to each worker thread. This can improve load balancing in jobs that perform a large amount of work on a small number of entities.
+*Make generate linker xml files deterministic in order.
+* Within an IDE debugger, `ComponentSystemGroup` will present more relevant information. The raw view will be available for those who need the precise makeup of the class.
+* `ComponentSystemGroup.RemoveSystemFromUpdateList` and `ComponentSystemGroup.RemoveUnmanagedSystemFromUpdateList` can now be used when `ComponentSystemGroup.EnableSystemSorting` is set to false
+* Add debug checks to detect "placeholder" Entities created by one `EntityCommandBuffer` from being passed into a different `EntityCommandBuffer`.
+* Clarified error message when calling `.Dispose()` on an `EntityQuery` created by `GetEntityQuery()`. This is always an error; these queries belong to the associated system, and should never be manually disposed. They will be cleaned up along with the system itself.
+* Within an IDE debugger, `ArchetypeChunk` will present more relevant information. The raw view will be available for those who need the precise makeup of the struct.
+* Within an IDE debugger, `EntityArchetype` will present more relevant information. The raw view will be available for those who need the precise makeup of the struct.
+* IJobEntityBatch batchIndex parameter has been renamed to batchId. Documentation regarding what values to expect from this parameter have been updated accordingly.
+* Changed: Within an IDE debugger, `EntityManager` will present more relevant information. The raw view will be available for those who need the precise makeup of the struct.
+* Changed: Within an IDE debugger, an `ArchetypeChunk`'s OrderVersion and ChangeVersions per ComponentType will be easier to view.
+* Changed: Within an IDE debugger, `SystemState` will present more relevant information. The raw view will be available for those who need the precise makeup of the struct.
+* Changed: Within an IDE debugger, `World` will present more relevant information. The raw view will be available for those who need the precise makeup of the struct.
+* `EntityCommandBufferSystem.CreateCommandBuffer()` now uses the `World.UpdateAllocator` to allocate command buffers instead of `Allocator.TempJob`. Allocations from this allocator have a fixed lifetime of two full World Update cycles, rather than being tied to the display frame rate.
+* `EntityCommandBuffer.AddComponentForEntityQuery<T>()` now asserts if the provided `T` value contains a reference to a temporary `Entity` created earlier in the same command buffer; these Entities are not yet correctly patched with the correct final Entity during playback. This patching will be implemented in a future change.
+*Removed `ComponentSystemBaseManagedComponentExtensions.HasSingleton{T}` - `ComponentSystemBase.HasSingleton{T}` already handles managed components.
+* ISystemBase to ISystem
+* New Query Window design.
+* FixedRateUtils renamed to RateUtils
+* IFixedRateManager renamed to IRateManager
+* Records in the EntitiesJournaling feature now have OriginSystem that will be populated for which system requested the change. This information is helpful to determine where a deferred EntityCommandBuffer was recorded from.
+* Improved diagnostic when a SubScene section entity does not meet one of the constraints during GameObject conversion.
+
+### Deprecated
+
+* In a future release, `IJobEntityBatch.RunWithoutJobsInternal()` and `IJobEntityBatchWithIndex.RunWithoutJobsInternal()` will be removed from the public API; as the names indicate, they are for internal use only. User code should use the non-`Internal()` variants of these functions.
+* Several public functions in the EntityDataAccess have been deprecated. The new functions follow this convention <FunctionName>DuringStructuralChange(...)
+* Entity Debugger has been marked as deprecated and will be removed in a future release. See new windows under **Window > DOTS**.
+
+### Removed
+
+* Deprecated functions in the EntityCommandBuffer for EntityQueries that were processed at Playback.
+* GI Light baking in Closed SubScenes for now to remain consistent with Entity mesh renderers.
+* `Unity.Entities.RegisterGenericJobTypeAttribute` has been moved to Unity.Jobs as `Unity.Jobs.RegisterGenericJobTypeAttribute`.
+* StreamBinaryReader and StreamBinaryWriter are now internal
+* Removed JobComponentSystem.  It has been replaced by SystemBase, which it much better tested and supported.  The Entities 0.5 upgrade guide explains how to upgrade from JobComponentSystem to SystemBase.
+* IJobBurstSchedulable
+* Job reflection data ILPP
+
+### Fixed
+
+* Fixed bug that caused compiler errors when users wrote multiple parts of the same partial type.
+* Fixed a minor typo when generating the name of a conversion World.
+* `[DisableAutoCreation]` is no longer inherited by subclasses, as documented.
+* Improved the Entity inspector responsiveness.
+* In Burst 1.5.0, fixed some player-build warnings that were caused by some entities code that contained `throw` statements not within `[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]` guarded functions.
+* Performance of system safety checks greatly improved
+* Systems window, Entities window and Components window all use the same minimum size.
+* Systems window style issue in minimum size.
+* Incremental conversion issue where children of disabled gameobjects are not properly re-enabled when parent is re-enabled.
+* Fixed multiple inspectors issue with Entity Inspector where contents are duplicated in the existing inspectors.
+* Fixed multiple inspectors issue with System Inspector where only the latest inspector has content while the rests are empty.
+* We now use the TypeCache in TypeManager when initializing, which is about twice as fast as previously.
+* Sometimes redundant error messages were logged, now fixed
+* `EntityQuery` methods which limit their processing to a specific `NativeArray<Entity>` now work correctly if the `EntityQuery` uses chunk filtering.
+* Certain code paths of `IJobEntityBatchWithIndex` were not storing the per-batch base entity indices at the correct byte offset.
+* `IJobEntityBatchWithIndex.ScheduleInternal()` did not always work correctly with `EntityQuery` chunk filtering and `limitToEntityArray` both enabled.
+* The variant of `IJobEntityBatchWithIndex.Run()` that took a `limitToEntityArray` parameter no longer asserts.
+* `IJobEntityBatch` was redundantly applying chunk filtering at both schedule-time and execute-time.
+* `EntityCommandBuffer` no longer leaks embedded entity arrays whose commands are never played back.
+* Methods that take an `EntityQuery` now validate the query's validity.
+* Add missing bounds checks for `EntityManager` methods.
+* A `ComponentSystemGroup` that disables automatic system sorting no longer sets its "sort order is dirty" flag on every update.
+* `EntityQuery.SetSingleton<T>()` will now throw an exception if the query only requested read-only access to type `T`.
+* `EntityQuery.GetSingleton<T>()` and `EntityQuery.SetSingleton<T>()` now assert if `T` is a zero-sized component, avoiding a potential out-of-bounds memory access.
+* Creating an `EntityQuery` with a non-empty list of `None` types will now match return a reference to an existing query if possible, instead of always creating a new query.
+* `EntityCommandBuffer` playback of `*ForEntityQuery()` commands no longer leaks `AtomicSafetyHandle` allocations when collections checks are enabled
+* Memory leak in BlobAssets when a World was disposed that had BlobAssets. Primarily seen when entering and exiting Playmode in the Editor.
+* XXHash3 could potentially throw exceptions if Burst compilation was disabled. This is no longer that case.
+* variant checkbox in GhostAuthoringComponent inspector was disabled if no variants for that component were present, not letting the user select the DoNotSerialize variation.
+* SendToOwner not handled correctly by the client. Now both server and client do not send/receive the component only if the ghost present a GhostOwnerComponent.
+* Baked lightmaps for SubScenes will no longer appear black due to lack of compiled shader features
+* Clamp compute shader support detection to disallow GL < 4.3
+* If you update multiple packages, create a new section with a new header for the other package.
+* EntityDiffer no longer patches BlobAsset or Entity references from `UnityEngine.Object` types.
+* Debugging of source-generated Entities.ForEach
+* Some main-threads `EntityCommandBuffer` methods were missing the necessary safety checks.
+* StructuralChangeProfiler should now have the proper scope when making changes through the EntityCommandBuffer and EntityManager.
+
+
+
+## [0.19.0] - 2021-03-15
+
+### Added
+
+* Usage of `RegisterBindingAttribute` through `[GenerateAuthoringComponent]` when the user opts in to using Sourcegen
+* Names assigned to entities are now available by default in all builds, not just within the Editor. To strip Entity debug names from builds, define `DOTS_DISABLE_DEBUG_NAMES` in your project's build configuration.
+* The package whose Changelog should be added to should be in the header. Delete the changelog section entirely if it's not needed.
+* Added support for loading entity scene headers asynchronously (disabled by default).
+* `IJobChunk`, `IJobEntityBatch`, `IJobEntityBatchWithIndex`, and `IJobParallelForDefer` now have `ByRef()` versions of all `.Schedule()` and `.Run()` methods. These should be used in cases where the corresponding job struct is too large to pass by value to the existing methods (~10KB or larger). Functionality is otherwise the same as the existing methods.
+* Unmanaged `EntityQueryDescBuilder` allows Burst code to construct entity queries
+* Entity debug names will be disabled by default in release builds. The new build component "Enable Entity Names" can be added to a release build configuration to re-enable these names, if the application has some use for them.
+* `SystemRef<T>` and `SystemHandle<T>` offer a way to keep track of unmanaged systems
+* Update `com.unity.properties` and `com.unity.serialization` to `1.7.0`
+* (EXPERIMENTAL) A new scripting define (`UNITY_DOTS_DEBUG`) enables a subset of inexpensive API validation and error handling in standalone builds.
+
+### Changed
+
+* Updated platform packages to `0.12.0-preview.8`
+* Manual testing, repro fixed
+* Renamed LiveLink view modes (Under DOTS Menu in the Editor) to something more clear. DOTS->Conversion Settings:
+* New version of Roslyn compiler to enable source-generator features.
+*Burst compatibility tests added for EntityQueryManager + EntityQuery
+* When DOTS_DISABLED_DEBUG_NAMES is enabled, `EntityCommandBuffer.SetName` will have minimal overhead.
+*Cleaned up many uses of UNITY_2020_2_OR_NEWER, UNITY_DOTSPLAYER, UNITY_DOTSRUNTIME, and NET_DOTS
+*Added `StableHash` to `EntityArchetype`, which represent an archetype stable hash calculated from the component types stable hash.
+
+### Deprecated
+
+* SceneBundleHandle.UseAssetBundles is deprecated. It no longer had any use and was never meant to be public.
+* `EntityQuery.CompareQuery()` with managed `EntityQueryDesc`. Use the variant that accepts an `EntityQueryDescBuilder` instead.
+* `WordStorage`,`NumberedWords`, and `Words` are marked for deprecation, as these storages are not recommended for public use.
+
+### Removed
+
+* Removed `struct FastEquality.Layout`.
+* EntitiesBurstCompatibilityTests has been removed and placed into the Entities test project.
+
+### Fixed
+
+* Enabling a hierarchy would sometimes fail to create a child array on the parent entity.
+* Fix entities not rendering past -32785 units on the X Axis.
+* Issue with StorageInfoFromEntity which causes exception due to incorrect Read access permissions to the Entity type
+* Blob assets built with BlobBuilder should now always be properly aligned.
+* Missing 'catalog.bin' file on Android when building a DOTS game with SubScenes.
+* `BlobAssetReferenceData` did not implement `IEquality` interface which could result in `BlobAssetReference` comparisons to fail even though the underlying data pointers are the same.
+* If you update multiple packages, create a new section with a new header for the other package.
+* Added missing closing braces for suggested fixes in ComponentSystemSorter warnings
+* scene streaming will no longer raise a NullPointerException if a previous load failed due to an error.
+* `EntityCommandBuffer.AddComponent()` for managed components no longer triggers a double-dispose on the component.
+* Fix issue where no timing information was displayed for struct systems in the entity debugger
+* Struct systems implementing ISystemBaseStartStop now don't receive double stop notifications
+* SDF fonts are now rendered with correct anti-aliasing on WASM
+
+
+### Removed/Deprecated/Changed
+
+* Each bullet should be prefixed with Added, Fixed, Removed, Deprecated, or Changed to indicate where the entry should go.
+
+
+
+## [0.18.0] - 2021-01-26
+
+### Added
+
+* Toggle support
+* The package whose Changelog should be added to should be in the header. Delete the changelog section entirely if it's not needed.
+* AddSharedComponentForEntityQuery<T>(EntityQuery, T) and SetSharedComponentForEntityQuery<T>(EntityQuery, T). Both methods 'capture' the set of entities to modify at record time, not playback time.
+* `BufferAllocatorVirtualMemory` for virtual memory backed allocations of fixed size buffers.
+* `BufferAllocatorHeap` for heap backed allocations of fixed size buffers.
+* `EntityCommandBuffer` methods for managed components that perform a query at record time (instead of at playback time): `AddComponentObjectForEntityQuery` and `SetComponentObjectForEntityQuery`.
+* Added new method `GetEntityQueryDesc` to `EntityQuery`. It can be used to retrieve an `EntityQueryDesc` from which the query can be re-created.
+* Support for adding HybridComponents in conversion using DstEntityManager.AddComponentObject(). Support is limited to built-in types provided by Unity already, and not custom components.
+* standalone builds by default opt out of using entity debug name storage. When opted out, `EntityManager.GetName` will return a default string, and `EntityManager.SetName` is a no-op. To override this default and include debug names in standalone builds, define `DOTS_USE_DEBUG_NAMES` in the Player "scripting defines" field.
+* `EntityCommandBuffer.SetName`, allowing users to set a debug name on an `Entity` created from `EntityCommandBuffer.CreateEntity`
+* GameObjectSceneUtility.AddGameObjectSceneReferences() that can be used in custom Entity Bootstrap code to ensure currently loaded Game Object Scenes are added as references to the GameObjectSceneSystem for cases where these scenes were loaded without the GameObjectSceneSystem (eg in the Editor and pressing Play).
+* New `StorageInfoFromEntity` struct which allows reading information about how an entity is stored (such as its `ArchetypeChunk` and index inside of the chunk), from within a job. You can also use `StorageInfoFromEntity` to check if an `Entity` exists, or if it has been destroyed.
+* ConcurrentSectionStreamCount & MaximumWorldsMovedPerUpdate can now be set on SceneSectionStreamingSystem in order to tweak the throttling of scene section streaming
+
+### Changed
+
+* Sample scene now has text that updates based on toggle state.
+* EntityCommandBuffer.ParallelWriter no longer throws when recording on the main thread. (The throw was added to prevent 'improper' use, but there's nothing actually harmful about recording to an ECB.ParallelWriter on the main thread.)
+* Updated platform packages to `0.11.0-preview.10`.
+* `BufferAllocator` which selects between `BufferAllocatorVirtualMemory` or `BufferAllocatorHeap`, depending on platform capabilities.
+* improved performance of EntityManager.SetName() and EntityManager.GetName()
+*Added EntityManager.GetName(FixedString64)
+*Added EntityManager.SetName(Entity, out FixedString64)
+*Fixed an issue where passing an invalid or deleted `Entity` into `EntityManager.GetName` or `EntityManager.SetName` would result in a valid operation. The functions now throw an `ArgumentException` if the Entity is invalid.
+* `EntityManager.GetName()` returns the relevant string containing "ENTITY_NOT_FOUND" when the given `Entity` does not exist in the `World`
+* AssetDependencyTracker is now faster when there are multiple async artifacts pointing to the same guid
+* ResolveSceneReferenceSystem has a fast path for instantiated entity scenes (eg. for scene tile streaming)
+* Update minimum editor version to 2020.2.1f1-dots.3
+*Updated platform packages to `0.11.0-preview.11`
+*Updated properties package to `1.6.0-preview`
+*Updated serialization package to `1.6.2-preview`
+* Updated `com.unity.burst` to `1.4.4`
+* `EntityQuery` methods (`.ToEntityArray()`, `.ToComponentDataArray()`, and `.CopyFromComponentDataArray()`) distribute their work across multiple worker threads for sufficiently large workloads.
+* EntityScene now relies on a new File format that reduces copying of memory while deserializing
+* The constructor of MemoryBinaryReader now takes the length of the memory block and checks for out of bounds reads
+* BinaryReader and BinaryWriter interfaces now have a Position property that can be set to seek within the stream
+* Performance of ResolveSceneReferenceSystem is improved
+* Improved performance of `EntityQuery.IsEmptyIgnoreFilter`, `GetSingleton()`, `GetSingletonEntity()`, and `SetSingleton()` for infrequently-changing queries.
+
+### Deprecated
+
+* The `EntityCommandBuffer` methods which perform an `EntityQuery` at playback are now deprecated. Instead use the methods whose names end with "ForEntityQuery". These "ForEntityQuery" methods perform the query at 'record time' (when the method is called).
+* GameObjectConversionSystem.AddHybridComponent()
+* `StreamBinaryReader` and `StreamBinaryWriter` have been deprecated and will no longer be part of the public API. Please provide your own implementation if you need it.
+
+### Removed
+
+* Removed deprecated `GameObjectEntity.CopyAllComponentsToEntity`, `EntityManager.Instantiate(GameObject)`, `GameObjectConversionUtility.ConvertIncremental`, `ScriptBehaviourUpdateOrder.UpdatePlayerLoop`, `ScriptBehaviourUpdateOrder.IsWorldInPlayerLoop` and `TypeManager.TypeCategory.Class`
+* Removed these expired deprecated APIs: `EntitySelectionProxy.EntityControlSelectButtonHandler`, `EntitySelectionProxy.EntityControlSelectButton`, `EntitySelectionProxy.EntityManager`, `EntitySelectionProxy.OnEntityControlSelectButton`, and `EntitySelectionProxy.SetEntity`
+* Removed expired APIs `ArchetypeChunk.BatchEntityCount`
+* Removed expired fixed time step APIs `ComponentSystemGroup.UpdateCallback`, `FixedStepSimulationSystemGroup.MaximumDeltaTime`, `FixedRateUtils.EnableFixedRateWithCatchup/EnableFixedRateSimple/DisableFixedRate`
+* Removed expired `Frozen` component
+* Removed expired `GameObjectConversionSettings.Fork` method and `GameObjectConversionSettings.NamespaceId` field
+* Removed expired `EntityGuid.NamespaceId` field
+* Removed expired `GameObjectConversionUtility.GetEntityGuid` method
+
+### Fixed
+
+* TargetGraphic field in toggle and button now converted
+* Removed various testing components from the entities package from the Add Component menu.
+* `EntityQuery`'s matching chunk cache could briefly become stale in some cases.
+* Inspecting an invalid entity in the inspector will no longer throw an exception.
+* If you update multiple packages, create a new section with a new header for the other package.
+* Rare issue with SubScenes left visible in a Scene they were not present in anymore (Editor only)
+* StableTypeHash for `UnityEngine.Object` component types to not collide when the same `typeof(myObjectType).FullName` is present in multiple assemblies loaded in the editor.
+* Fixed potential out-of-bounds memory access when changing a chunk's archetype in-place.
+* Fixed a bug where the same name assembly loaded in the editor could result in the EntitiesILPostProcessor throwing an ArgumentException due to duplicate keys being used to add to a dictionary.
+* SceneSystem.GetGUID would fail to match equivalent file paths with lowercase/uppercase mismatches.
+* Ensure warning against using systems with `[ExcludeAlways]` does not trigger with versions of Unity including and after 2020.2.
+* Fixed an issue where precompiledreferences defined to an empty array `[]` in .asmdef files would potentially throw errors in the buildprogram on OSX machines.
+* You can now debug the contents of `BlobAssetReference<T>`
+* Removed excessive warnings due to incompatible fields not being able to be inserted into the `BindingRegistry`
+* You can now group conversion systems and process after load systems by marking their parent groups with the corresponding `WorldFilterFlags`
+* EntityDebugger no longer hides worlds with duplicated names
+* A bug where `EntityQuery.IsEmpty` did not respect change filters being modified in pending jobs when Job Threads are used
+* Entities are now written to YAML in the order that they appear in a chunk
+* A `NullReferenceException` when using `IJobEntityBatch` after calling `EntityManager.DestroyEntity(EntityQuery)`.
+* EntityManager.GetCreatedAndDestroyedEntities() no longer returns ChunkHeader entities in the new entity list.
+* Fixed a bug where streaming in scenes instantiated multiple times with multiple sections and references between those sections, entity ids wouldn't get correctly remapped, thus we would reference entities in a different scene / tile
+* Chunk.SequenceNumber (Internal API) is now guranteed to be unique when deserializing a chunk from disk. SequenceNumbers are used in internal world diffing methods to detect changes.
+* Fix `GetSingletonEntity()` HRV2 error when destroying all the entities in the EntityManager
+* Compilation error when removing the built-in module Particle System
+* AutoLoad disabled on SubScenes works correctly again
+* Regression where an entity could not be renamed multiple times.
+* Fixed Entity inspector throwing when a dynamic buffer is removed from an inspected entity.
+* Tiny.UI "Hidden" computation fixed.
+* EntityManagerDebugView now also displays meta entities (for chunk components) and shared components.
+* using `BlobBuilder` in generic methods no longer raises a safety error
+* Many methods that use `IJob` were marked as `[NotBurstCompatible]` to reflect their true Burst compatibility.
+
+
+### Removed/Deprecated/Changed
+
+* Each bullet should be prefixed with Added, Fixed, Removed, Deprecated, or Changed to indicate where the entry should go.
+
+
 
 ## [0.17.0] - 2020-11-13
 

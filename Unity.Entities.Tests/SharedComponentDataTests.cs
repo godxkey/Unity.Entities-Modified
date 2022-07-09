@@ -68,6 +68,61 @@ namespace Unity.Entities.Tests
         public SharedData9(int val) { value = val; }
     }
 
+    struct SharedData10 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData10(int val) { value = val; }
+    }
+
+    struct SharedData11 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData11(int val) { value = val; }
+    }
+
+    struct SharedData12 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData12(int val) { value = val; }
+    }
+
+    struct SharedData13 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData13(int val) { value = val; }
+    }
+
+    struct SharedData14 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData14(int val) { value = val; }
+    }
+
+    struct SharedData15 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData15(int val) { value = val; }
+    }
+
+    struct SharedData16 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData16(int val) { value = val; }
+    }
+
+    struct SharedData17 : ISharedComponentData
+    {
+        public int value;
+
+        public SharedData17(int val) { value = val; }
+    }
 
     class SharedComponentDataTests : ECSTestsFixture
     {
@@ -101,7 +156,7 @@ namespace Unity.Entities.Tests
             Entity e2 = m_Manager.CreateEntity(archetype);
             m_Manager.SetComponentData(e2, new EcsTestData(243));
 
-            var group1_filter0_data = group1_filter_0.ToComponentDataArray<EcsTestData>(Allocator.TempJob);
+            var group1_filter0_data = group1_filter_0.ToComponentDataArray<EcsTestData>(World.UpdateAllocator.ToAllocator);
 
             Assert.AreEqual(2, group1_filter_0.CalculateEntityCount());
             Assert.AreEqual(0, group1_filter_20.CalculateEntityCount());
@@ -110,9 +165,8 @@ namespace Unity.Entities.Tests
 
             m_Manager.SetSharedComponentData(e1, new SharedData1(20));
 
-            group1_filter0_data.Dispose();
-            group1_filter0_data = group1_filter_0.ToComponentDataArray<EcsTestData>(Allocator.TempJob);
-            var group1_filter20_data = group1_filter_20.ToComponentDataArray<EcsTestData>(Allocator.TempJob);
+            group1_filter0_data = group1_filter_0.ToComponentDataArray<EcsTestData>(World.UpdateAllocator.ToAllocator);
+            var group1_filter20_data = group1_filter_20.ToComponentDataArray<EcsTestData>(World.UpdateAllocator.ToAllocator);
 
             Assert.AreEqual(1, group1_filter_0.CalculateEntityCount());
             Assert.AreEqual(1, group1_filter_20.CalculateEntityCount());
@@ -121,8 +175,7 @@ namespace Unity.Entities.Tests
 
             m_Manager.SetSharedComponentData(e2, new SharedData1(20));
 
-            group1_filter20_data.Dispose();
-            group1_filter20_data = group1_filter_20.ToComponentDataArray<EcsTestData>(Allocator.TempJob);
+            group1_filter20_data = group1_filter_20.ToComponentDataArray<EcsTestData>(World.UpdateAllocator.ToAllocator);
 
             Assert.AreEqual(0, group1_filter_0.CalculateEntityCount());
             Assert.AreEqual(2, group1_filter_20.CalculateEntityCount());
@@ -134,9 +187,6 @@ namespace Unity.Entities.Tests
             group12.Dispose();
             group1_filter_0.Dispose();
             group1_filter_20.Dispose();
-
-            group1_filter0_data.Dispose();
-            group1_filter20_data.Dispose();
         }
 
         [Test]
@@ -331,7 +381,7 @@ namespace Unity.Entities.Tests
                 Assert.IsFalse(ChunkDataUtility.AreLayoutCompatible(archetype.Archetype, archetypeWithShared.Archetype));
             }
 
-            using (var entities = new NativeArray<Entity>(1, Allocator.TempJob))
+            using (var entities = CollectionHelper.CreateNativeArray<Entity, RewindableAllocator>(1, ref World.UpdateAllocator))
             {
                 m_Manager.CreateEntity(archetype, entities);
                 Assert.IsFalse(m_Manager.HasComponent<EcsTestSharedCompWithMaxChunkCapacity>(entities[0]));
@@ -403,26 +453,22 @@ namespace Unity.Entities.Tests
             m_Manager.CreateEntity(archetype0);
             var entity1 = m_Manager.CreateEntity(archetype1);
 
-            var preChunks0 = group0.CreateArchetypeChunkArray(Allocator.TempJob);
-            var preChunks1 = group1.CreateArchetypeChunkArray(Allocator.TempJob);
+            var preChunks0 = group0.CreateArchetypeChunkArray(World.UpdateAllocator.ToAllocator);
+            var preChunks1 = group1.CreateArchetypeChunkArray(World.UpdateAllocator.ToAllocator);
 
             Assert.AreEqual(2, ArchetypeChunkArray.CalculateEntityCount(preChunks0));
             Assert.AreEqual(1, ArchetypeChunkArray.CalculateEntityCount(preChunks1));
 
             m_Manager.RemoveComponent<SharedData2>(entity1);
 
-            var postChunks0 = group0.CreateArchetypeChunkArray(Allocator.TempJob);
-            var postChunks1 = group1.CreateArchetypeChunkArray(Allocator.TempJob);
+            var postChunks0 = group0.CreateArchetypeChunkArray(World.UpdateAllocator.ToAllocator);
+            var postChunks1 = group1.CreateArchetypeChunkArray(World.UpdateAllocator.ToAllocator);
 
             Assert.AreEqual(2, ArchetypeChunkArray.CalculateEntityCount(postChunks0));
             Assert.AreEqual(0, ArchetypeChunkArray.CalculateEntityCount(postChunks1));
 
             group0.Dispose();
             group1.Dispose();
-            preChunks0.Dispose();
-            preChunks1.Dispose();
-            postChunks0.Dispose();
-            postChunks1.Dispose();
         }
 
         [Test]
@@ -464,17 +510,13 @@ namespace Unity.Entities.Tests
         {
             var archetype = m_Manager.CreateArchetype(
                 typeof(EcsTestData),
-                typeof(SharedData1),
-                typeof(SharedData2),
-                typeof(SharedData3),
-                typeof(SharedData4),
-                typeof(SharedData5),
-                typeof(SharedData6),
-                typeof(SharedData7),
-                typeof(SharedData8));
+                typeof(SharedData1), typeof(SharedData2), typeof(SharedData3), typeof(SharedData4),
+                typeof(SharedData5), typeof(SharedData6), typeof(SharedData7), typeof(SharedData8),
+                typeof(SharedData9), typeof(SharedData10), typeof(SharedData11), typeof(SharedData12),
+                typeof(SharedData13), typeof(SharedData14), typeof(SharedData15), typeof(SharedData16));
 
             Entity e = m_Manager.CreateEntity(archetype);
-            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData9>(e));
+            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData17>(e));
         }
 
         [Test]
@@ -482,18 +524,14 @@ namespace Unity.Entities.Tests
         {
             var archetype = m_Manager.CreateArchetype(
                 typeof(EcsTestData),
-                typeof(SharedData1),
-                typeof(SharedData2),
-                typeof(SharedData3),
-                typeof(SharedData4),
-                typeof(SharedData5),
-                typeof(SharedData6),
-                typeof(SharedData7),
-                typeof(SharedData8));
+                typeof(SharedData1), typeof(SharedData2), typeof(SharedData3), typeof(SharedData4),
+                typeof(SharedData5), typeof(SharedData6), typeof(SharedData7), typeof(SharedData8),
+                typeof(SharedData9), typeof(SharedData10), typeof(SharedData11), typeof(SharedData12),
+                typeof(SharedData13), typeof(SharedData14), typeof(SharedData15), typeof(SharedData16));
 
             Entity e = m_Manager.CreateEntity(archetype);
             EntityQuery q = m_Manager.CreateEntityQuery(typeof(EcsTestData));
-            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData9>(q));
+            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData17>(q));
             q.Dispose();
         }
 
@@ -502,18 +540,14 @@ namespace Unity.Entities.Tests
         {
             var archetype = m_Manager.CreateArchetype(
                 typeof(EcsTestData),
-                typeof(SharedData1),
-                typeof(SharedData2),
-                typeof(SharedData3),
-                typeof(SharedData4),
-                typeof(SharedData5),
-                typeof(SharedData6),
-                typeof(SharedData7),
-                typeof(SharedData8));
+                typeof(SharedData1), typeof(SharedData2), typeof(SharedData3), typeof(SharedData4),
+                typeof(SharedData5), typeof(SharedData6), typeof(SharedData7), typeof(SharedData8),
+                typeof(SharedData9), typeof(SharedData10), typeof(SharedData11), typeof(SharedData12),
+                typeof(SharedData13), typeof(SharedData14), typeof(SharedData15), typeof(SharedData16));
 
             var entities = new NativeArray<Entity>(1024, Allocator.Persistent);
             m_Manager.CreateEntity(archetype, entities);
-            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData9>(entities));
+            Assert.Throws<InvalidOperationException>(() => m_Manager.AddComponent<SharedData17>(entities));
             entities.Dispose();
         }
 

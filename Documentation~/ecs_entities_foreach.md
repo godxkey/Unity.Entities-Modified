@@ -38,12 +38,12 @@ The following example illustrates how to access the EntityQuery object implicitl
 <a name="optional-components"></a>
 ### Optional components
 
-You cannot create a query specifying optional components (using WithAny&lt;T,U&gt;) and also access those components in the lambda function. If you need to read or write to a component that is optional, you can split the Entities.ForEach construction into multiple jobs, one for each combination of the optional components. For example, if you had two optional components, you would need three ForEach constructions: one including the first optional component, one including the second, and one including both components. Another alternative is to iterate by chunk using IJobChunk.
+You can't create a query specifying optional components (using WithAny&lt;T,U&gt;) and also access those components in the lambda function. If you need to read or write to a component that is optional, you can split the Entities.ForEach construction into multiple jobs, one for each combination of the optional components. For example, if you had two optional components, you would need three ForEach constructions: one including the first optional component, one including the second, and one including both components. Another alternative is to iterate by chunk using IJobChunk.
 
 <a name="change-filtering"></a>
 ### Change filtering
 
-In cases where you only want to process an entity component when another entity of that component has changed since the last time the current [SystemBase] instance has run, you can enable change filtering using WithChangeFilter&lt;T&gt;. The component type used in the change filter must either be in the lambda function parameter list or part of a WithAll&lt;T&gt; statement.
+In cases where you only want to process an Entity Component when another Component of that Entity has changed since the last time the current [SystemBase] instance has run, you can use `WithChangeFilter<T>` to enable change filtering. The Component type used in the change filter must either be in the lambda function parameter list or part of a `WithAll<T>` statement.
 
 [!code-cs[with-change-filter](../DocCodeSamples.Tests/LambdaJobExamples.cs#with-change-filter)]
 
@@ -73,9 +73,9 @@ A typical lambda function looks like:
 
 By default, you can pass up to eight parameters to an Entities.ForEach lambda function. (If you need to pass more parameters, you can [define a custom delegate](#custom-delegates).) When using the standard delegates, you must group the parameters in the following order:
 
-    1. Parameters passed-by-value first (no parameter modifiers)
-    2. Writable parameters second (`ref` parameter modifier)
-    3. Read-only parameters last (`in` parameter modifier)
+1. Parameters passed-by-value first (no parameter modifiers)
+2. Writable parameters second (`ref` parameter modifier)
+3. Read-only parameters last (`in` parameter modifier)
 
 All components should use either the `ref` or the `in` parameter modifier keywords. Otherwise, the component struct passed to your function is a copy instead of a reference. This means an extra memory copy for read-only parameters and means that any changes to components you intended to update are silently thrown when the copied struct goes out of scope after the function returns.
 
@@ -123,7 +123,7 @@ For dynamic buffers, use DynamicBuffer&lt;T&gt; rather than the Component type s
 <a name="named-parameters"></a>
 ### Special, named parameters
 
-In addition to components, you can pass the following special, named parameters to the Entities.ForEach lambda function, which are assigned values based on the entity the job is currently processing:
+In addition to components, you can pass the following special, named parameters to the Entities.ForEach lambda function, which are assigned values based on the entity the job is currently processing
 
 * **`Entity entity`** — the Entity instance of the current entity. (The parameter can be named anything as long as the type is Entity.)
 * **`int entityInQueryIndex`** — the index of the entity in the list of all entities selected by the query. Use the entity index value when you have a [native array] that you need to fill with a unique value for each entity. You can use the entityInQueryIndex as the index in that array. The entityInQueryIndex should also be used as the `sortKey` for adding commands to a concurrent [EntityCommandBuffer].
@@ -154,20 +154,23 @@ The following table shows which features are currently supported in [Entities.Fo
 | Supported Feature             | Run                                             | Schedule | ScheduleParallel     |
 |-------------------------------|-------------------------------------------------|----------|----------------------|
 | Capture local value type      | x                                               | x        | x                    |
-| Capture local reference type  | x (only WithoutBurst)                           |          |                      |
+| Capture local reference type  | x (only WithoutBurst and not in ISystem)    |          |                      |
 | Writing to captured variables | x                                               |          |                      |
 | Use field on the system class | x (only WithoutBurst)                           |          |                      |
-| Methods on reference types    | x (only WithoutBurst)                           |          |                      |
-| Shared Components             | x (only WithoutBurst)                           |          |                      |
-| Managed Components            | x (only WithoutBurst)                           |          |                      |
-| Structural changes            | x (only WithoutBurst and WithStructuralChanges) |          |                      |
+| Methods on reference types    | x (only WithoutBurst and not in ISystem)    |          |                      |
+| Shared Components             | x (only WithoutBurst and not in ISystem)    |          |                      |
+| Managed Components            | x (only WithoutBurst and not in ISystem)    |          |                      |
+| Structural changes            | x (only WithStructuralChanges and not in ISystem) |          |                      |
 | SystemBase.GetComponent       | x                                               | x        | x                    |
 | SystemBase.SetComponent       | x                                               | x        |                      |
 | GetComponentDataFromEntity    | x                                               | x        | x (only as ReadOnly) |
 | HasComponent                  | x                                               | x        | x                    |
 | WithDisposeOnCompletion       | x                                               | x        | x                    |
+| WithScheduleGranularity       |                                                 |          | x                    |
 
-An [Entities.ForEach] construction uses specialized intermediate language (IL) compilation post-processing to translate the code you write for the construction into correct ECS code. This translation allows you to express the intent of your algorithm without having to include complex, boilerplate code. However, it can mean that some common ways of writing code are not allowed.
+__Note:__ `WithStructuralChanges()` will disable Burst.  Do not use this option if you want to achieve high levels of performance in your [Entities.ForEach] (instead use an [EntityCommandBuffer]).
+
+An [Entities.ForEach] construction uses Roslyn source generators to translate the code you write for the construction into correct ECS code. This translation allows you to express the intent of your algorithm without having to include complex, boilerplate code. However, it can mean that some common ways of writing code are not allowed.
 
 The following features are not currently supported:
 
@@ -176,13 +179,11 @@ The following features are not currently supported:
 | Dynamic code in .With invocations                                               |
 | SharedComponent parameters by ref                                               |
 | Nested Entities.ForEach lambda expressions                                      |
-| Entities.ForEach in systems marked with [ExecuteAlways] (currently being fixed) |
 | Calling with delegate stored in variable, field or by method                    |
 | SetComponent with lambda parameter type                                         |
 | GetComponent with writable lambda parameter                                     |
 | Generic parameters in lambdas                                                   |
 | In systems with generic parameters                                              |
-
 
 ## Dependencies
 
@@ -194,7 +195,6 @@ See [Job dependencies] for more general information about job dependencies.
 [Dependency]: xref:Unity.Entities.SystemBase.Dependency
 [race condition]: https://en.wikipedia.org/wiki/Race_condition
 [Job dependencies]: xref:ecs-job-dependencies
-[IJobParallelFor]: https://docs.unity3d.com/Manual/JobSystemParallelForJobs.html
 [OnUpdate()]: xref:Unity.Entities.SystemBase.OnUpdate*
 [Entities.ForEach]: xref:Unity.Entities.SystemBase.Entities
 [SystemBase.Entities]: xref:Unity.Entities.SystemBase.Entities

@@ -6,34 +6,29 @@ namespace Unity.Entities.Tests
 {
     partial class ChangeVersionTests : ECSTestsFixture
     {
-#if !UNITY_DOTSRUNTIME  // IJobForEach is deprecated
-        class BumpVersionSystemInJob : ComponentSystem
+#if !UNITY_DOTSRUNTIME
+        partial class BumpVersionSystemInJob : SystemBase
         {
-            public EntityQuery m_Group;
-
-#pragma warning disable 618
-            struct UpdateData : IJobForEach<EcsTestData, EcsTestData2>
+            JobHandle UpdateEcsTestData2()
             {
-                public void Execute(ref EcsTestData data, ref EcsTestData2 data2)
-                {
-                    data2 = new EcsTestData2 {value0 = 10};
-                }
+                return
+                    Entities
+                        .ForEach((ref EcsTestData data, ref EcsTestData2 data2) =>
+                        {
+                            data2 = new EcsTestData2 { value0 = 10 };
+                        })
+                        .Schedule(default);
             }
 
             protected override void OnUpdate()
             {
-                var updateDataJob = new UpdateData {};
-                var updateDataJobHandle = updateDataJob.Schedule(m_Group);
-                updateDataJobHandle.Complete();
+                UpdateEcsTestData2().Complete();
             }
 
             protected override void OnCreate()
             {
-                m_Group = GetEntityQuery(ComponentType.ReadWrite<EcsTestData>(),
-                    ComponentType.ReadWrite<EcsTestData2>());
             }
         }
-#pragma warning restore 618
 #endif
 
         class BumpVersionSystem : ComponentSystem
@@ -42,8 +37,8 @@ namespace Unity.Entities.Tests
 
             protected override void OnUpdate()
             {
-                var data = m_Group.ToComponentDataArray<EcsTestData>(Allocator.TempJob);
-                var data2 = m_Group.ToComponentDataArray<EcsTestData2>(Allocator.TempJob);
+                var data = m_Group.ToComponentDataArray<EcsTestData>(World.UpdateAllocator.ToAllocator);
+                var data2 = m_Group.ToComponentDataArray<EcsTestData2>(World.UpdateAllocator.ToAllocator);
 
                 for (int i = 0; i < data.Length; ++i)
                 {
@@ -54,9 +49,6 @@ namespace Unity.Entities.Tests
 
                 m_Group.CopyFromComponentDataArray(data);
                 m_Group.CopyFromComponentDataArray(data2);
-
-                data.Dispose();
-                data2.Dispose();
             }
 
             protected override void OnCreate()
@@ -66,7 +58,7 @@ namespace Unity.Entities.Tests
             }
         }
 
-        class BumpChunkTypeVersionSystem : JobComponentSystem
+        partial class BumpChunkTypeVersionSystem : SystemBase
         {
             struct UpdateChunks : IJobParallelFor
             {
@@ -93,16 +85,16 @@ namespace Unity.Entities.Tests
                 m_LastAllChanged = false;
             }
 
-            protected override JobHandle OnUpdate(JobHandle inputDeps)
+            protected override void OnUpdate()
             {
-                var chunks = m_Group.CreateArchetypeChunkArray(Allocator.TempJob);
+                var chunks = m_Group.CreateArchetypeChunkArray(World.UpdateAllocator.ToAllocator);
                 var ecsTestDataType = GetComponentTypeHandle<EcsTestData>();
                 var updateChunksJob = new UpdateChunks
                 {
                     Chunks = chunks,
                     EcsTestDataTypeHandle = ecsTestDataType
                 };
-                var updateChunksJobHandle = updateChunksJob.Schedule(chunks.Length, 32, inputDeps);
+                var updateChunksJobHandle = updateChunksJob.Schedule(chunks.Length, 32, Dependency);
                 updateChunksJobHandle.Complete();
 
                 // LastSystemVersion bumped after update. Check for change
@@ -112,9 +104,6 @@ namespace Unity.Entities.Tests
                 {
                     m_LastAllChanged &= chunks[i].DidChange(ecsTestDataType, LastSystemVersion);
                 }
-
-                chunks.Dispose();
-                return new JobHandle();
             }
 
             public bool AllEcsTestDataChunksChanged()
@@ -145,6 +134,110 @@ namespace Unity.Entities.Tests
             Assert.AreEqual(0, system.LastSystemVersion);
             system.Update();
             Assert.AreNotEqual(0, system.LastSystemVersion);
+        }
+
+        partial class ChunkDidChangeManagedSystem : SystemBase
+        {
+            ComponentTypeHandle<EcsTestData> m_ComponentTypeHandle;
+            EntityQuery m_Query;
+
+            public bool DidChange { get; private set; }
+
+            protected override void OnCreate()
+            {
+                m_ComponentTypeHandle = GetComponentTypeHandle<EcsTestData>();
+                m_Query = GetEntityQuery(typeof(EcsTestData));
+            }
+
+            protected override void OnUpdate()
+            {
+                using (var chunks = m_Query.CreateArchetypeChunkArray(Allocator.Temp))
+                {
+                    Assert.That(chunks.Length, Is.EqualTo(1));
+                    DidChange = chunks[0].DidChange(m_ComponentTypeHandle, LastSystemVersion);
+                }
+            }
+        }
+
+        [Test]
+        public void Chunk_DidChange_ManagedSystemDetectsChange()
+        {
+            var system = World.GetOrCreateSystem<ChunkDidChangeManagedSystem>();
+            var entity = m_Manager.CreateEntity(typeof(EcsTestData));
+
+            system.Update();
+            Assert.That(system.DidChange, Is.True);
+
+            system.Update();
+            Assert.That(system.DidChange, Is.False);
+
+            system.Update();
+            Assert.That(system.DidChange, Is.False);
+
+            m_Manager.SetComponentData(entity, new EcsTestData { value = 1 });
+
+            system.Update();
+            Assert.That(system.DidChange, Is.True);
+
+            system.Update();
+            Assert.That(system.DidChange, Is.False);
+
+            system.Update();
+            Assert.That(system.DidChange, Is.False);
+        }
+
+        partial struct ChunkDidChangeUnmanagedSystem : ISystem
+        {
+            ComponentTypeHandle<EcsTestData> m_ComponentTypeHandle;
+            EntityQuery m_Query;
+
+            public bool DidChange { get; private set; }
+
+            public void OnCreate(ref SystemState state)
+            {
+                m_ComponentTypeHandle = state.GetComponentTypeHandle<EcsTestData>();
+                m_Query = state.GetEntityQuery(typeof(EcsTestData));
+            }
+
+            public void OnDestroy(ref SystemState state)
+            {
+            }
+
+            public void OnUpdate(ref SystemState state)
+            {
+                using (var chunks = m_Query.CreateArchetypeChunkArray(Allocator.Temp))
+                {
+                    Assert.That(chunks.Length, Is.EqualTo(1));
+                    DidChange = chunks[0].DidChange(m_ComponentTypeHandle, state.LastSystemVersion);
+                }
+            }
+        }
+
+        [Test]
+        public void Chunk_DidChange_UnmanagedSystemDetectsChange()
+        {
+            var system = World.GetOrCreateSystem<ChunkDidChangeUnmanagedSystem>();
+            var entity = m_Manager.CreateEntity(typeof(EcsTestData));
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.True);
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.False);
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.False);
+
+            m_Manager.SetComponentData(entity, new EcsTestData { value = 1 });
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.True);
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.False);
+
+            system.Update(World.Unmanaged);
+            Assert.That(system.Struct.DidChange, Is.False);
         }
 
         partial class DidChangeTestSystem : SystemBase
@@ -257,7 +350,7 @@ namespace Unity.Entities.Tests
             entities.Dispose();
         }
 
-#if !UNITY_DOTSRUNTIME  // IJobForEach is deprecated
+#if !UNITY_DOTSRUNTIME
         [Test]
         public void CHG_SystemVersionJob()
         {

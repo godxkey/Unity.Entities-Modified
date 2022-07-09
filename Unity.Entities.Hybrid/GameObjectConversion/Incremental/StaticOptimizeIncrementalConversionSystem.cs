@@ -1,11 +1,10 @@
-﻿#if UNITY_2020_2_OR_NEWER
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Unity.Entities
 {
     [UpdateInGroup(typeof(ConversionSetupGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.GameObjectConversion)]
-    class StaticOptimizeIncrementalConversionSystem : SystemBase
+    partial class StaticOptimizeIncrementalConversionSystem : SystemBase
     {
         private HashSet<int> _staticTag = new HashSet<int>();
         IncrementalChangesSystem _incremental;
@@ -39,4 +38,3 @@ namespace Unity.Entities
         }
     }
 }
-#endif

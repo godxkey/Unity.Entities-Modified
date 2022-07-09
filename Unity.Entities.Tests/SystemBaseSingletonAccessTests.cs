@@ -1,3 +1,4 @@
+#define SOME_DEFINE
 using System;
 using NUnit.Framework;
 using Unity.Collections;
@@ -18,7 +19,29 @@ namespace Unity.Entities.Tests
 
         public partial class SystemBase_TestSystem : SystemBase
         {
+            public int SingletonProperty
+            {
+                get => GetSingleton<EcsTestData>().value;
+                set => SetSingleton(new EcsTestData {value = value});
+            }
+
+            public struct SingletonDataInSystem : IComponentData
+            {
+                public float value;
+            }
+
             protected override void OnUpdate() {}
+
+            public void SingletonPropertyGetterAndSetter()
+            {
+                EntityManager.CreateEntity(typeof(EcsTestData));
+
+                var defaultSingletonValue = SingletonProperty;
+                Assert.AreEqual(expected: 0, defaultSingletonValue);
+
+                SingletonProperty = 10;
+                Assert.AreEqual(10, GetSingleton<EcsTestData>().value);
+            }
 
             public void GetSetSingleton()
             {
@@ -26,6 +49,14 @@ namespace Unity.Entities.Tests
 
                 SetSingleton(new EcsTestData(10));
                 Assert.AreEqual(10, GetSingleton<EcsTestData>().value);
+            }
+
+            public void GetSetSingletonInSystem()
+            {
+                EntityManager.CreateEntity(typeof(SystemBase_TestSystem.SingletonDataInSystem));
+
+                SetSingleton(new SystemBase_TestSystem.SingletonDataInSystem() { value = 10.0f });
+                Assert.AreEqual(10, GetSingleton<SystemBase_TestSystem.SingletonDataInSystem>().value);
             }
 
             T GenericMethodWithSingletonAccess<T>(T value) where T : struct, IComponentData
@@ -40,6 +71,21 @@ namespace Unity.Entities.Tests
 
                 GenericMethodWithSingletonAccess(new EcsTestData(10));
                 Assert.AreEqual(10, GetSingleton<EcsTestData>().value);
+            }
+
+            struct TestStruct { }
+
+            int SingletonAccessInGenericMethodWithInParameter<T>(in T inArgument) where T: struct
+            {
+                return GetSingleton<EcsTestData>().value;
+            }
+
+            public void GetSingletonInGenericMethodWithInParameter()
+            {
+                var entity = EntityManager.CreateEntity(typeof(EcsTestData));
+                EntityManager.SetComponentData(entity, new EcsTestData{ value = 10 });
+
+                Assert.AreEqual(expected: 10, actual: SingletonAccessInGenericMethodWithInParameter(new TestStruct()));
             }
 
             public void SingletonMethodsWithValidFilter_GetsAndSets()
@@ -184,6 +230,19 @@ namespace Unity.Entities.Tests
                 Assert.AreEqual(3, query.GetSingleton<EcsTestData>().value);
             }
 
+            public void SetSingletonWithExpressionWithPreprocessorTriviaWorks()
+            {
+                EntityManager.CreateEntity(typeof(EcsTestData));
+                SetSingleton(new EcsTestData()
+                {
+#if SOME_DEFINE
+                    value = 3
+#endif
+                });
+
+                Assert.AreEqual(3, GetSingleton<EcsTestData>().value);
+            }
+
             public struct GenericDataType<T> : IComponentData where T : unmanaged
             {
                 public T value;
@@ -217,15 +276,33 @@ namespace Unity.Entities.Tests
         }
 
         [Test]
+        public void SystemBase_SingletonGetterAndSetter()
+        {
+            TestSystem.SingletonPropertyGetterAndSetter();
+        }
+
+        [Test]
         public void SystemBase_GetSetSingleton()
         {
             TestSystem.GetSetSingleton();
         }
 
         [Test]
+        public void SystemBase_GetSetSingletonInSystem()
+        {
+            TestSystem.GetSetSingletonInSystem();
+        }
+
+        [Test]
         public void SystemBase_GetSetSingletonWithGenericParameter()
         {
             TestSystem.GetSetSingletonWithGenericParameter();
+        }
+
+        [Test]
+        public void SystemBase_SingletonAccessInGenericMethodWithInParameter()
+        {
+            TestSystem.GetSingletonInGenericMethodWithInParameter();
         }
 
         [Test]
@@ -292,6 +369,12 @@ namespace Unity.Entities.Tests
         public void SystemBase_GetSingletonThroughQueryWorks()
         {
             TestSystem.GetSingletonThroughQueryWorks();
+        }
+
+        [Test]
+        public void SystemBase_SetSingletonWithExpressionWithPreprocessorTriviaWorks()
+        {
+            TestSystem.SetSingletonWithExpressionWithPreprocessorTriviaWorks();
         }
 
         [Test]

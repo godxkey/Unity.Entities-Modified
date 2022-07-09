@@ -47,9 +47,11 @@ namespace Unity.Entities
             var chunkCounter = 0;
             var entityOffsetPrefixSum = 0;
 
-            for (var m = 0; m < Archetypes.Length; ++m)
+            int archetypeCount = Archetypes.Length;
+            var ptrs = Archetypes.Ptr;
+            for (var m = 0; m < archetypeCount; ++m)
             {
-                var match = Archetypes.Ptr[m];
+                var match = ptrs[m];
                 if (match->Archetype->EntityCount <= 0)
                     continue;
 
@@ -120,9 +122,11 @@ namespace Unity.Entities
             var filteredChunkCount = 0;
             var filteredEntityOffset = 0;
 
-            for (var m = 0; m < Archetypes.Length; ++m)
+            int archetypeCount = Archetypes.Length;
+            var ptrs = Archetypes.Ptr;
+            for (var m = 0; m < archetypeCount; ++m)
             {
-                var match = Archetypes.Ptr[m];
+                var match = ptrs[m];
                 if (match->Archetype->EntityCount <= 0)
                     continue;
 
@@ -207,6 +211,7 @@ namespace Unity.Entities
     {
         [NativeDisableUnsafePtrRestriction] public byte* ComponentData;
         public int TypeIndex;
+        public uint GlobalSystemVersion;
 
         public void Execute(ArchetypeChunk batchInChunk, int batchIndex, int indexOfFirstEntityInQuery)
         {
@@ -215,7 +220,8 @@ namespace Unity.Entities
             var typeOffset = archetype->Offsets[indexInTypeArray];
             var typeSize = archetype->SizeOfs[indexInTypeArray];
 
-            var dst = batchInChunk.m_Chunk->Buffer + typeOffset;
+            var dst = ChunkDataUtility.GetComponentDataWithTypeRW(batchInChunk.m_Chunk,
+                batchInChunk.m_BatchStartEntityIndex, TypeIndex, GlobalSystemVersion);
             var src = ComponentData + (indexOfFirstEntityInQuery * typeSize);
             var copySize = typeSize * batchInChunk.Count;
 

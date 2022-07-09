@@ -1,13 +1,13 @@
-#if UNITY_2020_2_OR_NEWER
 using System.Collections.Generic;
 using Unity.Collections;
+using Unity.Entities.Conversion;
 using UnityEngine;
 
 namespace Unity.Entities
 {
     [UpdateInGroup(typeof(ConversionSetupGroup))]
     [WorldSystemFilter(WorldSystemFilterFlags.GameObjectConversion)]
-    class GameObjectEnableDisableIncrementalConversionSystem : SystemBase
+    partial class GameObjectEnableDisableIncrementalConversionSystem : SystemBase
     {
         readonly HashSet<int> _disabledGameObjects = new HashSet<int>();
         readonly HashSet<int> _visitedInstances = new HashSet<int>();
@@ -17,6 +17,32 @@ namespace Unity.Entities
         {
             base.OnCreate();
             _incremental = World.GetExistingSystem<IncrementalChangesSystem>();
+
+            AddDisabledGameObjectsFromScene(World.GetExistingSystem<GameObjectConversionMappingSystem>());
+        }
+
+        void AddDisabledGameObjectsFromScene(GameObjectConversionMappingSystem mapping)
+        {
+            if (!mapping.Scene.isSubScene || !mapping.Scene.IsValid())
+                return;
+
+            var rootGameObjects = new List<GameObject>(mapping.Scene.rootCount);
+            mapping.Scene.GetRootGameObjects(rootGameObjects);
+            foreach (var rootGameObject in rootGameObjects)
+            {
+                RecursivelyAddDisabledGameObjects(rootGameObject);
+            }
+
+            void RecursivelyAddDisabledGameObjects(GameObject gameObject)
+            {
+                if (!gameObject.activeInHierarchy)
+                    _disabledGameObjects.Add(gameObject.GetInstanceID());
+
+                foreach (Transform child in gameObject.transform)
+                {
+                    RecursivelyAddDisabledGameObjects(child.gameObject);
+                }
+            }
         }
 
         protected override void OnUpdate()
@@ -101,4 +127,3 @@ namespace Unity.Entities
         }
     }
 }
-#endif

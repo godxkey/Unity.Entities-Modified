@@ -30,9 +30,9 @@ namespace Unity.Scenes
                 return SceneGUID.GetHashCode();
             }
         }
-        private static NativeMultiHashMap<int, SubSceneData> SubSceneLookup;
+        private static NativeParallelMultiHashMap<int, SubSceneData> SubSceneLookup;
 
-        private static NativeMultiHashMap<int, SubSceneData>.Enumerator GetSubScenes(Scene gameObjectScene)
+        private static NativeParallelMultiHashMap<int, SubSceneData>.Enumerator GetSubScenes(Scene gameObjectScene)
         {
             if (!SubSceneLookup.IsCreated)
                 CreateSubSceneLookup();
@@ -62,7 +62,7 @@ namespace Unity.Scenes
 
         private static void CreateSubSceneLookup()
         {
-            SubSceneLookup = new NativeMultiHashMap<int, SubSceneData>(0, Allocator.Persistent);
+            SubSceneLookup = new NativeParallelMultiHashMap<int, SubSceneData>(0, Allocator.Persistent);
 
             #if UNITY_EDITOR
             AppDomain.CurrentDomain.DomainUnload += OnDomainUnload;
@@ -116,9 +116,7 @@ namespace Unity.Scenes
                 entityManager.AddSharedComponentData(sceneEntity, gameObjectSceneReference);
             }
 
-            #if UNITY_EDITOR
             entityManager.SetName(sceneEntity, $"GameObject Scene: {gameObjectScene.name}");
-            #endif
 
             var subSceneDataEnum = GetSubScenes(gameObjectScene);
             entityManager.AddBuffer<GameObjectSceneSubScene>(sceneEntity);
@@ -222,13 +220,6 @@ namespace Unity.Scenes
 
             if (destroySceneProxyEntity && !destroySectionProxyEntities)
                 throw new ArgumentException("When unloading a scene it's not possible to destroy the scene entity without also destroying the section entities. Please also add the UnloadParameters.DestroySectionProxyEntities flag");
-
-            if (sys.EntityManager.HasComponent<GameObjectSceneDependency>(sceneEntity))
-            {
-                var dependency = sys.EntityManager.GetComponentData<GameObjectSceneDependency>(sceneEntity);
-                sys.EntityManager.DestroyEntity(dependency.Value);
-                sys.EntityManager.RemoveComponent<GameObjectSceneDependency>(sceneEntity);
-            }
 
             if (removeRequest)
             {
